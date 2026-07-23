@@ -41,7 +41,7 @@ All libraries are loaded from public CDNs — no build step or install required.
 
 | Library | Version | Purpose |
 |---|---|---|
-| [jsPDF](https://github.com/parallax/jsPDF) | 2.5.1 | Generating the print-ready PDF output |
+| [jsPDF](https://github.com/parallax/jsPDF) | 4.2.1 | Generating the print-ready PDF output |
 | [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2.7.0 | Converting SVG content (vector elements/shapes) into PDF drawing operations |
 | [JSZip](https://stuk.github.io/jszip/) | 3.10.1 | Bundling exported card PNGs into a downloadable ZIP archive |
 | [SheetJS (xlsx)](https://sheetjs.com/) | 0.18.5 | Parsing uploaded CSV/XLSX data files |
