@@ -1,8 +1,12 @@
+<img src="./favicon.svg" width="128" height="128" />
+
 # ID Card Generator
 
 A single-file, client-side web app for designing and mass-producing ID cards (or any card-style layout) from a CSV/Excel data source. Everything runs in the browser — no backend, no upload of your data anywhere — and the whole tool lives in one HTML file (`idcard-generator.html`).
 
 Available in Indonesian (default) and English, with a light/dark theme toggle.
+
+![IDCardGen Screenshot](preview-idcard-gen.jpg)
 
 ## Key Features
 
