@@ -2,11 +2,20 @@
 
 # ID Card Generator
 
-A single-file, client-side web app for designing and mass-producing ID cards (or any card-style layout) from a CSV/Excel data source. Everything runs in the browser — no backend, no upload of your data anywhere — and the whole tool lives in one HTML file (`idcard-generator.html`).
+A single-file, client-side web app for designing and mass-producing ID cards (or any card-style layout) from a CSV/Excel data source. Everything runs in the browser — no backend, no upload of your data anywhere.
 
 Available in Indonesian (default) and English, with a light/dark theme toggle.
 
 ![IDCardGen Screenshot](preview-idcard-gen.jpg)
+
+## Two editions
+
+The repo ships two standalone, self-contained editions of the app. Both offer the same feature set described below — pick whichever one suits your setup, they aren't meant to be used together.
+
+| | `idcard-generator-v1.html` | `idcard-generator-v2.html` |
+|---|---|---|
+| Canvas/editing engine | Custom hand-built 2D canvas engine | [Fabric.js](https://fabricjs.com/) |
+| PDF export pipeline | jsPDF + svg2pdf.js | pdf-lib + fontkit (direct) |
 
 ## Key Features
 
@@ -43,16 +52,18 @@ Available in Indonesian (default) and English, with a light/dark theme toggle.
 
 All libraries are loaded from public CDNs — no build step or install required.
 
-| Library | Version | Purpose |
-|---|---|---|
-| [jsPDF](https://github.com/parallax/jsPDF) | 4.2.1 | Generating the print-ready PDF output |
-| [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2.7.0 | Converting SVG content (vector elements/shapes) into PDF drawing operations |
-| [JSZip](https://stuk.github.io/jszip/) | 3.10.1 | Bundling exported card PNGs into a downloadable ZIP archive |
-| [SheetJS (xlsx)](https://sheetjs.com/) | 0.18.5 | Parsing uploaded CSV/XLSX data files |
-| [pdf-lib](https://pdf-lib.js.org/) | 1.17.1 | Embedding source PDF files (used as backgrounds/images) as native vector pages in the exported PDF |
-| [pdf.js](https://mozilla.github.io/pdf.js/) | 3.11.174 | Rendering/reading PDF files used as image or background sources |
-| qrcode (bundled inline, not CDN-loaded) | — | Generating QR code elements |
-| Google Fonts (DM Mono, Syne, Roboto, Montserrat, Open Sans, Poppins, Oswald) | — | Default UI/card typography, plus support for adding any additional Google Font by name |
+| Library | Version | Purpose | Used in |
+|---|---|---|---|
+| [jsPDF](https://github.com/parallax/jsPDF) | 4.2.1 | Generating the print-ready PDF output | v1, v2 |
+| [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2.7.0 | Converting SVG content (vector elements/shapes) into PDF drawing operations | v1, v2 |
+| [Fabric.js](http://fabricjs.com/) | 5.3.1 | Canvas rendering and interactive object editing | v2 |
+| [fontkit](https://github.com/foliojs/fontkit) (via `@pdf-lib/fontkit`) | 1.1.1 | Font parsing/embedding for vector PDF text export | v2 |
+| [JSZip](https://stuk.github.io/jszip/) | 3.10.1 | Bundling exported card PNGs into a downloadable ZIP archive | v1, v2 |
+| [SheetJS (xlsx)](https://sheetjs.com/) | 0.18.5 | Parsing uploaded CSV/XLSX data files | v1, v2 |
+| [pdf-lib](https://pdf-lib.js.org/) | 1.17.1 | Embedding source PDF files (used as backgrounds/images) as native vector pages in the exported PDF | v1, v2 |
+| [pdf.js](https://mozilla.github.io/pdf.js/) | 3.11.174 | Rendering/reading PDF files used as image or background sources | v1, v2 |
+| qrcode (bundled inline, not CDN-loaded) | — | Generating QR code elements | v1, v2 |
+| Google Fonts (DM Mono, Syne, Roboto, Montserrat, Open Sans, Poppins, Oswald) | — | Default UI/card typography, plus support for adding any additional Google Font by name | v1, v2 |
 
 ## Notes
 

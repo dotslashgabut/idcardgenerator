@@ -73,6 +73,10 @@ select{cursor:pointer}
 .row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
 .chip{padding:5px 12px;border-radius:99px;font-size:.7rem;font-weight:700;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--text-muted);transition:all .2s}
+.grid-align-picker{display:grid;grid-template-columns:repeat(3,36px);gap:6px;margin-top:6px}
+.grid-align-dot{width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text-muted);font-size:.85rem;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s}
+.grid-align-dot:hover{border-color:var(--accent);color:var(--accent);background:var(--surface)}
+.grid-align-dot.active{background:var(--accent);color:#0d0f14;border-color:var(--accent);font-weight:700;box-shadow:0 0 10px rgba(0,229,176,0.3)}
 .chip.active{background:var(--accent);color:#0d0f14;border-color:var(--accent)}
 .chip:hover:not(.active){border-color:var(--accent);color:var(--accent)}
 .shape-picker{position:absolute;z-index:20;top:calc(100% + 6px);left:0;display:grid;grid-template-columns:repeat(4,40px);gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px;box-shadow:var(--shadow)}
@@ -128,6 +132,11 @@ table.dtbl tr:hover td{background:var(--surface2)}
 .field-el:hover{border-color:rgba(0,229,176,.5)}
 .field-el.selected{border:1.5px solid var(--accent);box-shadow:0 0 0 3px rgba(0,229,176,.15)}
 .field-el .txt-inner{width:100%;overflow:hidden;word-wrap:break-word;line-height:1.2;font-kerning:none;font-variant-ligatures:none}
+.field-el.editing{cursor:text}
+.field-el.editing .resize-handle,.field-el.editing .rotate-handle,.field-el.editing .skew-handle{display:none}
+.field-inline-edit{position:absolute;inset:0;width:100%;height:100%;resize:none;border:none;padding:0;margin:0;background:transparent;outline:none;overflow:hidden;line-height:1.2;font-kerning:none;font-variant-ligatures:none}
+@keyframes flashHighlight{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 3px var(--accent2)}}
+.flash-highlight{animation:flashHighlight .5s ease-in-out 2}
 .btn-s.active{background:var(--accent);color:#0d0f14;border-color:var(--accent)}
 .grid-overlay{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:6}
 .snap-guide{position:absolute;background:var(--accent2);pointer-events:none;z-index:20}
@@ -226,7 +235,7 @@ body.dragging-el,body.dragging-el *{user-select:none!important}
 <header>
   <div class="logo">
     <div class="logo-icon">🪪</div>
-    <div>ID<span>Card</span>Gen<small data-i18n="logoTag">batch generator dari CSV/Excel</small></div>
+    <div>ID<span>Card</span>Gen v1<small data-i18n="logoTag">batch generator dari CSV/Excel</small></div>
   </div>
   <div class="header-stats">
     <div class="stat-box"><div class="stat-value" id="statRows">0</div><div class="stat-label" data-i18n="statData">Data</div></div>
@@ -335,6 +344,7 @@ body.dragging-el,body.dragging-el *{user-select:none!important}
       <div class="card-title"><div class="t" data-i18n="cardCustomFont">Font Kustom</div></div>
       <div class="form-group">
         <label data-i18n="lblUploadFont">Upload File Font (.ttf/.otf/.woff/.woff2)</label>
+        <input type="text" id="fontFileNameTarget" data-i18n-ph="phFontFileName" placeholder="Nama font (opsional — biasanya terdeteksi otomatis dari file)" style="margin-bottom:6px;">
         <input type="file" id="fileFontUpload" accept=".ttf,.otf,.woff,.woff2" hidden>
         <button class="btn btn-s btn-full" id="btnFontUpload" data-i18n="btnUploadFont">📤 Upload File Font</button>
       </div>
@@ -549,6 +559,21 @@ body.dragging-el,body.dragging-el *{user-select:none!important}
         <div class="form-group"><label data-i18n="lblGapX">Jarak Horizontal (mm)</label><input type="number" id="gapXMM" value="3" step="0.5"></div>
         <div class="form-group"><label data-i18n="lblGapY">Jarak Vertikal (mm)</label><input type="number" id="gapYMM" value="3" step="0.5"></div>
       </div>
+      <div class="form-group" style="margin-top:10px">
+        <label data-i18n="lblGridAlign">Posisi Grid Kartu pada Kertas</label>
+        <div class="grid-align-picker" id="gridAlignPicker">
+          <div class="grid-align-dot" data-gridalign="top-left" title="Top Left (Kiri-Atas)">↖</div>
+          <div class="grid-align-dot" data-gridalign="top-center" title="Top Center (Tengah-Atas)">↑</div>
+          <div class="grid-align-dot" data-gridalign="top-right" title="Top Right (Kanan-Atas)">↗</div>
+          <div class="grid-align-dot" data-gridalign="middle-left" title="Middle Left (Kiri-Tengah)">←</div>
+          <div class="grid-align-dot active" data-gridalign="center" title="Center Middle (Tengah-Tengah)">•</div>
+          <div class="grid-align-dot" data-gridalign="middle-right" title="Middle Right (Kanan-Tengah)">→</div>
+          <div class="grid-align-dot" data-gridalign="bottom-left" title="Bottom Left (Kiri-Bawah)">↙</div>
+          <div class="grid-align-dot" data-gridalign="bottom-center" title="Bottom Center (Tengah-Bawah)">↓</div>
+          <div class="grid-align-dot" data-gridalign="bottom-right" title="Bottom Right (Kanan-Bawah)">↘</div>
+        </div>
+        <input type="hidden" id="gridAlign" value="center">
+      </div>
       <div class="form-group" id="fillOrderRow">
         <label data-i18n="lblFillOrder">Urutan Pengisian Data</label>
         <div class="chips">
@@ -649,8 +674,9 @@ body.dragging-el,body.dragging-el *{user-select:none!important}
       </div>
       <div class="grp">
         <button class="btn-icon btn-sm" id="btnZoomOut">−</button>
-        <span class="nav-idx" id="zoomVal">100%</span>
+        <button class="btn btn-s btn-sm" id="btnZoomReset" style="padding:4px 8px;font-family:var(--mono);font-size:.75rem" data-i18n-title="titleZoomReset" title="Klik untuk reset zoom ke 100%"><span id="zoomVal">100%</span></button>
         <button class="btn-icon btn-sm" id="btnZoomIn">+</button>
+        <button class="btn btn-s btn-sm" id="btnZoomFit" data-i18n="btnZoomFit" data-i18n-title="titleZoomFit" title="Muat ke layar">📐 Fit</button>
       </div>
       <div class="grp">
         <button class="btn-icon btn-sm" id="btnFirst" data-i18n-title="titleFirstCard" title="Ke kartu paling awal">⏮</button>
@@ -764,7 +790,7 @@ id: {
   lblWidthMm:'Lebar (mm)', lblHeightMm:'Tinggi (mm)', lblDpiExport:'DPI Export', lblCardSides:'Sisi Kartu', chipSingleSide:'Satu Sisi', chipDoubleSide:'Dua Sisi',
   lblBleed:'Extra Size / Bleed (mm)', hintBleed:'Menambah lebar & tinggi kartu saat cetak (bleed), agar hasil potongan tetap penuh warna/gambar meski ada sedikit pergeseran pisau potong. Elemen & posisi tidak berubah — hanya area cetak yang diperluas simetris ke luar. Garis putus-putus di editor menandai batas potong asli.',
   cardCustomFont:'Font Kustom', lblUploadFont:'Upload File Font (.ttf/.otf/.woff/.woff2)', btnUploadFont:'📤 Upload File Font',
-  lblFontFromUrl:'Dari URL Font', btnAdd:'+ Tambah', lblGoogleFont:'Google Font (nama persis)', phGoogleFont:'cth: Playfair Display',
+  lblFontFromUrl:'Dari URL Font', btnAdd:'+ Tambah', lblGoogleFont:'Google Font (nama persis)', phGoogleFont:'cth: Playfair Display', phFontFileName:'Nama font (opsional — biasanya terdeteksi otomatis dari file)',
   hintGoogleFont:'Nama harus sama persis seperti di fonts.google.com',
   cardBg:'Latar Belakang', tabFront:'Depan', tabBack:'Belakang', dzBgP:'Klik atau seret gambar latar', dzBgSub:'PNG/JPG, sesuaikan rasio kartu',
   lblImageMode:'Mode Gambar', chipCoverFull:'Cover (Proporsional Penuh)', chipContainFit:'Contain (Proporsional Pas)', chipStretch:'Stretch (Regangkan)',
@@ -807,7 +833,7 @@ id: {
   hintKeepPdf:'Kalau background atau elemen gambar diunggah dari file .pdf, opsi ini menyisipkannya sebagai halaman PDF asli (vector murni, tidak dirasterisasi) menggunakan pdf-lib — hasilnya lebih rapi & tajam dibanding konversi SVG. Background hanya bisa vector kalau posisi/zoom-nya masih default (belum digeser/di-zoom); kalau tidak, otomatis fallback ke raster.',
   chkKeepQr:'Pertahankan vector untuk QR code',
   hintKeepQr:'Default aktif: setiap kotak QR digambar sebagai persegi vector asli langsung di PDF (bukan gambar raster) — selalu tajam & tetap mudah di-scan di ukuran cetak berapa pun, dan hampir tidak menambah ukuran file. Otomatis fallback ke raster kalau elemen QR-nya dirotasi/dimiringkan (skew), atau kartu dirotasi/dibalik di lembar cetak.',
-  lblMargin:'Margin (mm)', lblGapX:'Jarak Horizontal (mm)', lblGapY:'Jarak Vertikal (mm)',
+  lblMargin:'Margin (mm)', lblGapX:'Jarak Horizontal (mm)', lblGapY:'Jarak Vertikal (mm)', lblGridAlign:'Posisi Grid Kartu pada Kertas',
   lblFillOrder:'Urutan Pengisian Data', fillRow:'→ Kiri ke Kanan dulu', fillCol:'↓ Atas ke Bawah dulu',
   hintFillOrder:'Urutan data mengisi slot kartu di lembar cetak: baris demi baris (kiri→kanan dulu, lalu turun ke baris berikutnya), atau kolom demi kolom (atas→bawah dulu, lalu geser ke kolom berikutnya).',
   chkCombine:'Gabung depan & belakang dalam 1 lembar', combineLR:'↔ Kiri-Kanan', combineTB:'↕ Atas-Bawah',
@@ -828,6 +854,7 @@ id: {
   btnSaveLayout:'💾 Simpan Layout (JSON)', btnLoadLayout:'📂 Muat Layout',
   tabFrontSide:'Sisi Depan', tabBackSide:'Sisi Belakang', chkShowData:'Tampilkan Data Asli',
   titleFirstCard:'Ke kartu paling awal', titleLastCard:'Ke kartu paling akhir', titleJumpCard:'Ketik nomor kartu lalu Enter untuk langsung berpindah',
+  titleZoomReset:'Klik untuk reset zoom ke 100%', titleZoomFit:'Muat kartu agar pas dengan area layar', btnZoomFit:'📐 Muat Layar',
   titleSwapCardOrient:'Tukar Lebar & Tinggi (Potrait/Landscape)',
   titleSnapGrid:'Aktifkan/nonaktifkan snap ke garis grid saat menggeser/resize elemen',
   titleGridSize:'Ukuran grid (mm)',
@@ -853,7 +880,7 @@ id: {
   pfFont:'Font', pfWeight:'Tebal', weightNormal:'Normal', weightSemiBold:'Semi Bold', weightBold:'Bold',
   pfFontSizeMm:'Ukuran Font (mm)', pfColor:'Warna', pfAlign:'Rata', alignLeftS:'Kiri', alignCenterS:'Tengah', alignRightS:'Kanan',
   pfValign:'Rata Vertikal', valignTop:'Atas', valignMiddle:'Tengah', valignBottom:'Bawah',
-  pfUppercase:'HURUF KAPITAL', pfReplaceImg:'🔄 Ganti Gambar', pfMode:'Mode', pfCover:'Cover', pfContain:'Contain', pfStretch:'Stretch',
+  pfTextCase:'Text Case', caseNone:'Normal', caseUpper:'HURUF KAPITAL', caseLower:'huruf kecil', caseSentence:'Kalimat', caseTitle:'Setiap Kata', pfReplaceImg:'🔄 Ganti Gambar', pfMode:'Mode', pfCover:'Cover', pfContain:'Contain', pfStretch:'Stretch',
   pfStretchText:'Regangkan Teks Mengisi Kotak', hintStretchText:'Teks diregangkan/dipepetkan (non-uniform) agar tepat mengisi lebar &amp; tinggi kotak, seperti gambar mode Stretch. Perataan &amp; bungkus baris otomatis dinonaktifkan selama mode ini aktif.',
   pfTextOutline:'Outline Huruf', hintTextOutline:'Menambahkan garis tepi (stroke) pada setiap huruf, mengikuti bentuk hurufnya sendiri — bukan sekadar kotak pembatas. Atur tebal outline dengan slider, dan gaya sudutnya (Bulat/Lancip/Terpotong) untuk pertemuan antar-goresan. Nonaktif secara default. Saat aktif, elemen ini otomatis dirender sebagai gambar (bukan teks vektor) di PDF agar outline-nya tetap muncul.',
   pfImageOutline:'Outline Gambar', hintImageOutline:'Menambahkan garis tepi (stroke) yang mengikuti bentuk piksel gambar yang tidak transparan (seperti efek stiker/cutout), bukan sekadar kotak pembatas. Atur tebal outline dengan slider, dan kehalusannya untuk hasil yang lebih bulat/mulus. Nonaktif secara default. Outline akan meluber keluar dari batas kotak elemen jika perlu (mis. mode Cover, di mana gambar sudah memenuhi penuh kotaknya) — jadi tetap terlihat di semua mode fit.',
@@ -892,7 +919,7 @@ en: {
   lblWidthMm:'Width (mm)', lblHeightMm:'Height (mm)', lblDpiExport:'Export DPI', lblCardSides:'Card Sides', chipSingleSide:'Single Side', chipDoubleSide:'Double Side',
   lblBleed:'Extra Size / Bleed (mm)', hintBleed:'Adds extra width & height to the card when printing (bleed), so trimmed edges stay fully covered in color/image even with a slight cutting-blade shift. Elements & positions don\'t change — only the print area expands symmetrically outward. The dashed line in the editor marks the original cut boundary.',
   cardCustomFont:'Custom Font', lblUploadFont:'Upload Font File (.ttf/.otf/.woff/.woff2)', btnUploadFont:'📤 Upload Font File',
-  lblFontFromUrl:'From Font URL', btnAdd:'+ Add', lblGoogleFont:'Google Font (exact name)', phGoogleFont:'e.g: Playfair Display',
+  lblFontFromUrl:'From Font URL', btnAdd:'+ Add', lblGoogleFont:'Google Font (exact name)', phGoogleFont:'e.g: Playfair Display', phFontFileName:'Font name (optional — usually auto-detected from the file)',
   hintGoogleFont:'Name must match exactly as shown on fonts.google.com',
   cardBg:'Background', tabFront:'Front', tabBack:'Back', dzBgP:'Click or drag a background image', dzBgSub:'PNG/JPG, match the card ratio',
   lblImageMode:'Image Mode', chipCoverFull:'Cover (Full Proportional)', chipContainFit:'Contain (Fit Proportional)', chipStretch:'Stretch',
@@ -935,7 +962,7 @@ en: {
   hintKeepPdf:'If a background or image element was uploaded from a .pdf file, this option inserts it as an actual PDF page (pure vector, not rasterized) using pdf-lib — the result is cleaner & sharper than an SVG conversion. A background can only stay vector if its position/zoom is still default (not moved/zoomed); otherwise it automatically falls back to raster.',
   chkKeepQr:'Keep vector for QR codes',
   hintKeepQr:'On by default: every QR module is drawn as a real vector square directly in the PDF (not a raster image) — always sharp and reliably scannable at any print size, and adds almost no file size. Automatically falls back to raster if the QR element itself is rotated/skewed, or the card is rotated/flipped on the print sheet.',
-  lblMargin:'Margin (mm)', lblGapX:'Horizontal Gap (mm)', lblGapY:'Vertical Gap (mm)',
+  lblMargin:'Margin (mm)', lblGapX:'Horizontal Gap (mm)', lblGapY:'Vertical Gap (mm)', lblGridAlign:'Card Grid Position on Paper',
   lblFillOrder:'Data Fill Order', fillRow:'→ Left to right first', fillCol:'↓ Top to bottom first',
   hintFillOrder:'Order in which data fills card slots on the print sheet: row by row (left→right first, then down to the next row), or column by column (top→bottom first, then across to the next column).',
   chkCombine:'Combine front & back on 1 sheet', combineLR:'↔ Left-Right', combineTB:'↕ Top-Bottom',
@@ -956,6 +983,7 @@ en: {
   btnSaveLayout:'💾 Save Layout (JSON)', btnLoadLayout:'📂 Load Layout',
   tabFrontSide:'Front Side', tabBackSide:'Back Side', chkShowData:'Show Actual Data',
   titleFirstCard:'Go to the first card', titleLastCard:'Go to the last card', titleJumpCard:'Type a card number then press Enter to jump there',
+  titleZoomReset:'Click to reset zoom to 100%', titleZoomFit:'Fit the card to the visible screen area', btnZoomFit:'📐 Fit',
   titleSwapCardOrient:'Swap Width & Height (Portrait/Landscape)',
   titleSnapGrid:'Toggle snapping to grid lines while dragging/resizing an element',
   titleGridSize:'Grid size (mm)',
@@ -981,7 +1009,7 @@ en: {
   pfFont:'Font', pfWeight:'Weight', weightNormal:'Normal', weightSemiBold:'Semi Bold', weightBold:'Bold',
   pfFontSizeMm:'Font Size (mm)', pfColor:'Color', pfAlign:'Align', alignLeftS:'Left', alignCenterS:'Center', alignRightS:'Right',
   pfValign:'Vertical Align', valignTop:'Top', valignMiddle:'Middle', valignBottom:'Bottom',
-  pfUppercase:'UPPERCASE', pfReplaceImg:'🔄 Replace Image', pfMode:'Mode', pfCover:'Cover', pfContain:'Contain', pfStretch:'Stretch',
+  pfTextCase:'Text Case', caseNone:'Normal', caseUpper:'UPPERCASE', caseLower:'lowercase', caseSentence:'Sentence case', caseTitle:'Title Case', pfReplaceImg:'🔄 Replace Image', pfMode:'Mode', pfCover:'Cover', pfContain:'Contain', pfStretch:'Stretch',
   pfStretchText:'Stretch Text To Fill Box', hintStretchText:'Text is stretched/squashed non-uniformly to exactly fill the box\'s width &amp; height, like the image Stretch mode. Alignment &amp; automatic line wrapping are disabled while this is on.',
   pfTextOutline:'Letter Outline', hintTextOutline:'Adds a stroke outline around every letter, following the actual letterform — not just a bounding box. Use the slider to set the thickness, and the corner style (Round/Sharp/Beveled) for where strokes meet. Off by default. While on, this field is automatically rendered as an image (not vector text) in the PDF so the outline still shows up.',
   pfImageOutline:'Image Outline', hintImageOutline:'Adds a stroke outline that hugs the non-transparent pixels of the image (a sticker/cutout-style effect), not just a bounding box. Use the slider to set the thickness, and the smoothness for a rounder/smoother result. Off by default. The outline bleeds outward past the field\'s box when needed (e.g. Cover mode, where the image already fills its box edge-to-edge) — so it stays visible in any fit mode.',
@@ -1092,6 +1120,25 @@ function measureStretchNaturalSize(text, fontWeight, fontPx, fontFamily, strokeE
   const extra = strokeExtraPx||0;
   return { w: w+extra, h: fontPx*1.2+extra };
 }
+// Applies the field's chosen text-case transform. Replaces the old boolean `uppercase` toggle
+// with a small set of common case styles; every render/measure/export path below calls this
+// instead of its own one-off `.toUpperCase()`, so adding a mode here only needs one change.
+// 'none' returns the text exactly as typed/bound. Uses \p{L} (any Unicode letter, not just a-z)
+// for the sentence/title-case first-letter lookups so accented names aren't left lowercase.
+function applyTextCase(text, textCase){
+  const s = String(text ?? '');
+  if(textCase==='upper') return s.toUpperCase();
+  if(textCase==='lower') return s.toLowerCase();
+  if(textCase==='sentence'){
+    const lower = s.toLowerCase();
+    const idx = lower.search(/\p{L}/u);
+    return idx===-1 ? lower : lower.slice(0,idx) + lower[idx].toUpperCase() + lower.slice(idx+1);
+  }
+  if(textCase==='title'){
+    return s.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m,sep,c) => sep+c.toUpperCase());
+  }
+  return s;
+}
 // Resize/rotate handlers move the field's own DOM element directly (no full renderStage) while
 // dragging, for performance — so a stretched text field's scale transform needs the same direct
 // touch-up mid-drag, or it would only "catch up" to the new box size once the gesture ends.
@@ -1101,7 +1148,7 @@ function updateTextStretch(f, el, scale){
   if(canvas){
     const record = state.data.rows[state.recordIndex] || null;
     let text = f.dataField ? (record ? (record[f.dataField] ?? '') : `{{${f.dataField}}}`) : (f.staticText || '');
-    if(f.uppercase) text = String(text).toUpperCase();
+    text = applyTextCase(text, f.textCase);
     const boxWpx = Math.max(1, Math.round(f.w*scale)), boxHpx = Math.max(1, Math.round(f.h*scale));
     canvas.width = boxWpx; canvas.height = boxHpx;
     const ctx = canvas.getContext('2d');
@@ -1340,6 +1387,73 @@ function sniffFontFormat(buf){
   }catch(e){}
   return 'unknown';
 }
+// Reads the font's own name straight out of its internal SFNT 'name' table, so an upload is
+// identified by the name the font was actually designed/shipped with — not by whatever the file
+// happens to be called on disk (which can be anything: "download (3).ttf", a renamed copy, etc).
+// This also means re-uploading the *same* font later (even under a totally different filename)
+// still matches and replaces the existing custom-font entry instead of creating a duplicate.
+// Works for TTF/OTF directly, and for WOFF1 (whose tables are zlib-compressed — inflated here via
+// the browser's built-in DecompressionStream). WOFF2 compresses the whole font with Brotli, which
+// this app doesn't ship a decoder for, so it returns null there and the filename is used instead.
+async function readFontNameFromBytes(buf){
+  try{
+    const dv = new DataView(buf);
+    const tag = dv.getUint32(0);
+    let nameBytes = null;
+    if(tag === 0x774F4646){ // 'wOFF'
+      const numTables = dv.getUint16(12);
+      let entry = 44; // WOFF header is 44 bytes, then numTables x 20-byte table directory entries
+      for(let i=0;i<numTables;i++,entry+=20){
+        const t = String.fromCharCode(dv.getUint8(entry),dv.getUint8(entry+1),dv.getUint8(entry+2),dv.getUint8(entry+3));
+        if(t!=='name') continue;
+        const tOffset = dv.getUint32(entry+4), compLength = dv.getUint32(entry+8), origLength = dv.getUint32(entry+12);
+        const raw = new Uint8Array(buf, tOffset, compLength);
+        if(compLength === origLength){ nameBytes = raw; }
+        else if(typeof DecompressionStream !== 'undefined'){
+          const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate'));
+          nameBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+        break;
+      }
+    } else if(tag === 0x00010000 || tag === 0x4F54544F /* OTTO */ || tag === 0x74727565 /* true */){
+      const numTables = dv.getUint16(4);
+      let entry = 12; // sfnt offset table is 12 bytes, then numTables x 16-byte table records
+      for(let i=0;i<numTables;i++,entry+=16){
+        const t = String.fromCharCode(dv.getUint8(entry),dv.getUint8(entry+1),dv.getUint8(entry+2),dv.getUint8(entry+3));
+        if(t!=='name') continue;
+        const tOffset = dv.getUint32(entry+8), tLength = dv.getUint32(entry+12);
+        nameBytes = new Uint8Array(buf, tOffset, tLength);
+        break;
+      }
+    }
+    return nameBytes ? parseSfntNameTable(nameBytes) : null;
+  }catch(e){ return null; }
+}
+// Parses a raw 'name' table: prefers nameID 4 (full font name), falls back to nameID 1 (family).
+function parseSfntNameTable(bytes){
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const count = dv.getUint16(2);
+  const stringAreaOffset = dv.getUint16(4);
+  let full = null, family = null;
+  for(let i=0;i<count;i++){
+    const rec = 6 + i*12;
+    const platformID = dv.getUint16(rec);
+    const nameID = dv.getUint16(rec+6);
+    const length = dv.getUint16(rec+8);
+    const offset = dv.getUint16(rec+10);
+    if(nameID!==4 && nameID!==1) continue;
+    const start = stringAreaOffset + offset;
+    if(start+length > bytes.byteLength) continue;
+    let str = '';
+    if(platformID===1){ for(let j=0;j<length;j++) str += String.fromCharCode(bytes[start+j]); } // Mac Roman, close enough to Latin1
+    else { for(let j=0;j+1<length;j+=2) str += String.fromCharCode((bytes[start+j]<<8) | bytes[start+j+1]); } // Windows/Unicode, UTF-16BE
+    str = str.trim();
+    if(!str) continue;
+    if(nameID===4 && !full) full = str;
+    if(nameID===1 && !family) family = str;
+  }
+  return full || family || null;
+}
 function arrayBufferToBase64(buf){
   const bytes = new Uint8Array(buf);
   let binary = '';
@@ -1459,9 +1573,9 @@ function drawVectorTextField(pdf, f, text, baseX, baseY, fontInfo){
     const [r,g,b] = hexToRgb(f.color);
     pdf.setTextColor(r,g,b);
     const lineHeightMM = f.fontSize*1.2;
-    const lines = getWrappedLinesMM(f, text);
+    const lines = getWrappedLinesMM(f, text, fontInfo);
     const tx = f.align==='left' ? baseX : f.align==='center' ? baseX+f.w/2 : baseX+f.w;
-    const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM);
+    const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM, fontInfo);
     const contentH = lines.length*lineHeightMM;
     const extraY = f.valign==='middle' ? (f.h-contentH)/2 : f.valign==='bottom' ? f.h-contentH : 0;
     let ty = baseY + extraY;
@@ -1488,7 +1602,7 @@ const state = {
     front: {bg:newBg(), fields:[]},
     back: {bg:newBg(), fields:[]}
   },
-  data: {headers:[], rows:[]},
+  data: {headers:[], rows:[], sourceName:''},
   photoField: '',
   filenameField: '',
   photos: new Map(),
@@ -1502,14 +1616,14 @@ const state = {
   customFonts: [],
   snap: {grid:false, object:false, card:false, sizeMM:2},
   lockAspect: false,
-  sheet: {paper:'a4', orientation:'auto', cardRotate:'off', elementMode:'layered', embedFontVector:false, keepSvgVector:false, keepPdfVector:true, keepQrVector:true, marginMM:5, gapXMM:3, gapYMM:3, mirrorBack:true, combineSides:false, combineMode:'lr', pairGapMM:5, rotateBack180:false, fillOrder:'row', cutGuides:false, cutGuideStyle:'corner', paperCustomW:210, paperCustomH:297},
+  sheet: {paper:'a4', orientation:'auto', cardRotate:'off', elementMode:'layered', embedFontVector:false, keepSvgVector:false, keepPdfVector:true, keepQrVector:true, marginMM:5, gapXMM:3, gapYMM:3, gridAlign:'center', mirrorBack:true, combineSides:false, combineMode:'lr', pairGapMM:5, rotateBack180:false, fillOrder:'row', cutGuides:false, cutGuideStyle:'corner', paperCustomW:210, paperCustomH:297},
   exportScope: 'all', exportRangeFrom: 1, exportRangeTo: 1
 };
 
 function newTextField(){
   const f = {id:uid(), type:'text', x:5, y:5, w:40, h:10, rotation:0, skewX:0, skewY:0, flipH:false, flipV:false,
     dataField:'', staticText: T('defaultNewText'), fontFamily:'Arial', fontSize:4,
-    fontWeight:'600', color:'#111111', align:'left', valign:'top', uppercase:false, stretch:false, opacity:1,
+    fontWeight:'600', color:'#111111', align:'left', valign:'top', textCase:'none', stretch:false, opacity:1,
     outline:false, outlineColor:'#ffffff', outlineWidth:0.3, outlineJoin:'round'};
   snapshotOrig(f);
   return f;
@@ -1754,6 +1868,7 @@ function loadDataFile(file){
       if(!rows.length){ alert(T('errNoDataHeader')); return; }
       state.data.headers = Object.keys(rows[0]);
       state.data.rows = rows.map(r => { const o={}; state.data.headers.forEach(h => o[h]=String(r[h]??'')); return o; });
+      state.data.sourceName = sanitizeFilename((file.name||'').replace(/\.[a-z0-9]+$/i,''));
       state.recordIndex = 0;
       if(!state.photoField) state.photoField = state.data.headers[0];
       if(!state.filenameField) state.filenameField = state.data.headers[0];
@@ -1902,20 +2017,63 @@ $('btnAddPhotoSource').onclick = () => {
 };
 
 /* ================= CUSTOM FONTS ================= */
+// BUG FIX: this used to dedupe against every existing custom font too (`state.customFonts.some
+// (...)`), which meant re-uploading/re-loading a font under the same name — e.g. re-uploading the
+// same file after fixing a typo in it, or just picking the file twice by accident — silently
+// renamed it to "Name 2", "Name 3", etc. and added a brand new row every time, instead of
+// updating the one that was already there. Now this only avoids colliding with the built-in
+// system font names (so an uploaded "Arial.ttf" doesn't get confused with the real system Arial,
+// which NO_EMBED_HINT/font-resolution code elsewhere keys off of by name) — a same-named custom
+// font is handled by upsertCustomFont() below instead, which replaces the existing entry in place.
 function slugFontName(base){
   let name = base, n = 1;
-  const exists = nm => BASE_FONTS.includes(nm) || state.customFonts.some(f=>f.name===nm);
-  while(exists(name)){ name = base + ' ' + (++n); }
+  while(BASE_FONTS.includes(name)){ name = base + ' ' + (++n); }
   return name;
+}
+// Removes any FontFace(s) already registered under this exact family name before a
+// replacement is added — otherwise document.fonts ends up with two sources for the same family
+// (the stale one and the new upload), and the browser is free to keep rendering the old one.
+function removeExistingFontFace(name){
+  const target = name.toLowerCase();
+  for(const face of Array.from(document.fonts)){
+    if(face.family.replace(/^["']|["']$/g,'').toLowerCase()===target) document.fonts.delete(face);
+  }
+}
+// Shared by the file/URL upload handlers below: if a custom font with this name (case-insensitive)
+// already exists, replace its data in place rather than adding a second, confusingly-similar row.
+function upsertCustomFont(name, kind, bytes, format, url){
+  const existing = state.customFonts.find(f => f.name.toLowerCase()===name.toLowerCase());
+  if(existing){
+    existing.source = kind; existing.bytes = bytes||null; existing.format = format||null; existing.url = url||null;
+    renderCustomFontList();
+    renderPropPanel();
+    return {name: existing.name, replaced: true};
+  }
+  addCustomFont(name, kind, bytes, format, url);
+  return {name, replaced: false};
 }
 function renderCustomFontList(){
   const list = $('customFontList');
   list.innerHTML = '';
   state.customFonts.forEach((cf,i) => {
+    const needsReupload = cf.source==='file' && !cf.bytes;
     const row = document.createElement('div');
     row.className = 'field-row';
-    row.innerHTML = `<div class="fi" style="font-family:'${escAttr(cf.name)}'">Aa</div><div class="fn">${escHtml(cf.name)}</div><div class="fx" data-i="${i}" title="${T('titleDel')}">✕</div>`;
-    row.querySelector('.fx').onclick = () => { state.customFonts.splice(i,1); renderCustomFontList(); renderPropPanel(); };
+    const en = state.lang==='en';
+    const badge = needsReupload
+      ? `<div class="fx" data-role="reload" title="${en?'Click to re-upload this font file':'Klik untuk upload ulang file font ini'}">🔄</div>`
+      : '';
+    row.innerHTML = `<div class="fi" style="font-family:'${escAttr(cf.name)}'">Aa</div><div class="fn">${escHtml(cf.name)}${needsReupload?` <span style="color:var(--accent2)">— ${en?'needs file':'perlu file'}</span>`:''}</div>${badge}<div class="fx" data-i="${i}" title="${T('titleDel')}">✕</div>`;
+    if(needsReupload){
+      row.querySelector('[data-role="reload"]').onclick = () => {
+        $('fontFileNameTarget').value = cf.name;
+        $('fontStatus').textContent = en
+          ? `Choose the "${cf.name}" font file to re-upload — its name is pre-filled above so it replaces this entry.`
+          : `Pilih file font "${cf.name}" untuk diupload ulang — namanya sudah diisi otomatis di atas agar menggantikan entri ini.`;
+        $('fileFontUpload').click();
+      };
+    }
+    row.querySelectorAll('.fx').forEach(el => { if(el.dataset.i!==undefined) el.onclick = () => { state.customFonts.splice(i,1); renderCustomFontList(); renderPropPanel(); }; });
     list.appendChild(row);
   });
 }
@@ -1933,16 +2091,22 @@ $('fileFontUpload').onchange = e => {
   reader.onload = async ev => {
     try{
       const buf = ev.target.result;
-      const name = slugFontName(file.name.replace(/\.[a-z0-9]+$/i,'') || 'Custom Font');
+      const nameTarget = $('fontFileNameTarget').value.trim();
+      // Priority: (1) a name typed/auto-filled in the override field, (2) the name read straight
+      // out of the font file itself, (3) only as a last resort, the filename.
+      const detected = nameTarget ? null : await readFontNameFromBytes(buf);
+      const name = nameTarget || slugFontName(detected || file.name.replace(/\.[a-z0-9]+$/i,'') || 'Custom Font');
+      removeExistingFontFace(name);
       const face = new FontFace(name, buf);
       await face.load();
       document.fonts.add(face);
       const format = sniffFontFormat(buf);
-      addCustomFont(name, 'file', buf, format);
+      const {replaced} = upsertCustomFont(name, 'file', buf, format);
       const embedOk = format==='ttf' || format==='otf';
-      status.textContent = state.lang==='en'
-        ? `Font "${name}" added successfully.` + (embedOk ? ' Can be embedded directly into the PDF.' : ` Note: ${format.toUpperCase()} format cannot be embedded in the PDF (needs .ttf/.otf), elements using this font will be rendered as an image on PDF export.`)
-        : `Font "${name}" berhasil ditambahkan.` + (embedOk ? ' Bisa di-embed langsung ke PDF.' : ` Catatan: format ${format.toUpperCase()} tidak bisa di-embed ke PDF (perlu .ttf/.otf), elemen dengan font ini akan dirender sebagai gambar saat export PDF.`);
+      const en = state.lang==='en';
+      status.textContent = (en ? `Font "${name}" ${replaced?'updated':'added'} successfully.` : `Font "${name}" berhasil ${replaced?'diperbarui':'ditambahkan'}.`)
+        + (embedOk ? (en?' Can be embedded directly into the PDF.':' Bisa di-embed langsung ke PDF.') : (en?` Note: ${format.toUpperCase()} format cannot be embedded in the PDF (needs .ttf/.otf), elements using this font will be rendered as an image on PDF export.`:` Catatan: format ${format.toUpperCase()} tidak bisa di-embed ke PDF (perlu .ttf/.otf), elemen dengan font ini akan dirender sebagai gambar saat export PDF.`));
+      $('fontFileNameTarget').value = '';
     }catch(err){ status.textContent = (state.lang==='en'?'Failed to load font: ':'Gagal memuat font: ') + err.message; }
   };
   reader.readAsArrayBuffer(file);
@@ -1954,23 +2118,27 @@ $('btnFontUrl').onclick = async () => {
   const status = $('fontStatus');
   status.textContent = state.lang==='en' ? 'Loading font from URL...' : 'Memuat font dari URL...';
   try{
-    const guess = (url.split('/').pop()||'CustomFont').replace(/\.[a-z0-9]+(\?.*)?$/i,'').replace(/[-_]+/g,' ') || 'Custom Font';
-    const name = slugFontName(guess);
-    const face = new FontFace(name, `url("${url}")`);
-    await face.load();
-    document.fonts.add(face);
     let bytes = null, format = null;
     try{
       const res = await fetch(url);
       if(res.ok){ bytes = await res.arrayBuffer(); format = sniffFontFormat(bytes); }
     }catch(fe){ /* CORS blocked the raw fetch — preview still works via FontFace, embedding won't */ }
-    addCustomFont(name, 'url', bytes, format, url);
+    // Prefer the name read from the actual font file; only fall back to guessing from the URL
+    // when the fetch failed (CORS) or the name couldn't be parsed out (e.g. WOFF2).
+    const detected = bytes ? await readFontNameFromBytes(bytes) : null;
+    const guess = (url.split('/').pop()||'CustomFont').replace(/\.[a-z0-9]+(\?.*)?$/i,'').replace(/[-_]+/g,' ') || 'Custom Font';
+    const name = slugFontName(detected || guess);
+    removeExistingFontFace(name);
+    const face = new FontFace(name, bytes ? bytes : `url("${url}")`);
+    await face.load();
+    document.fonts.add(face);
+    const {replaced} = upsertCustomFont(name, 'url', bytes, format, url);
     const embedOk = format==='ttf' || format==='otf';
     let note = '';
     const en = state.lang==='en';
     if(!bytes) note = en ? ' Note: the font file could not be fetched to embed in the PDF (possibly CORS), it will be rendered as an image on PDF export.' : ' Catatan: file font tidak bisa diambil untuk di-embed ke PDF (kemungkinan CORS), akan dirender sebagai gambar saat export PDF.';
     else if(!embedOk) note = en ? ` Note: ${format.toUpperCase()} format cannot be embedded in the PDF (needs .ttf/.otf), it will be rendered as an image on PDF export.` : ` Catatan: format ${format.toUpperCase()} tidak bisa di-embed ke PDF (perlu .ttf/.otf), akan dirender sebagai gambar saat export PDF.`;
-    status.textContent = (en ? `Font "${name}" added successfully.` : `Font "${name}" berhasil ditambahkan.`) + note;
+    status.textContent = (en ? `Font "${name}" ${replaced?'updated':'added'} successfully.` : `Font "${name}" berhasil ${replaced?'diperbarui':'ditambahkan'}.`) + note;
     $('fontUrlInput').value = '';
   }catch(err){ status.textContent = (state.lang==='en'?'Failed to load font from URL (check CORS/URL): ':'Gagal memuat font dari URL (cek CORS/URL): ') + err.message; }
 };
@@ -1990,7 +2158,7 @@ $('btnGoogleFont').onclick = async () => {
     }
     await document.fonts.load(`400 20px "${name}"`);
     await document.fonts.load(`700 20px "${name}"`);
-    if(!BASE_FONTS.includes(name) && !state.customFonts.some(f=>f.name===name)) addCustomFont(name, 'google');
+    if(!BASE_FONTS.includes(name) && !state.customFonts.some(f=>f.name.toLowerCase()===name.toLowerCase())) addCustomFont(name, 'google');
     status.textContent = state.lang==='en' ? `Google Font "${name}" is ready to use.` : `Google Font "${name}" siap dipakai.`;
     $('googleFontInput').value = '';
   }catch(err){ status.textContent = (state.lang==='en'?'Failed to load Google Font: ':'Gagal memuat Google Font: ') + err.message; }
@@ -2450,7 +2618,13 @@ function renderPropPanel(){
       <div class="chip ${f.valign==='middle'?'active':''}" data-valign="middle">${T('valignMiddle')}</div>
       <div class="chip ${f.valign==='bottom'?'active':''}" data-valign="bottom">${T('valignBottom')}</div>
     </div></div>`;
-    html += `<div class="form-group"><label><input type="checkbox" id="pf_uppercase" ${f.uppercase?'checked':''} style="width:auto"> ${T('pfUppercase')}</label></div>`;
+    html += `<div class="form-group"><label>${T('pfTextCase')}</label><div class="chips">
+      <div class="chip ${(f.textCase||'none')==='none'?'active':''}" data-textcase="none">${T('caseNone')}</div>
+      <div class="chip ${f.textCase==='upper'?'active':''}" data-textcase="upper">${T('caseUpper')}</div>
+      <div class="chip ${f.textCase==='lower'?'active':''}" data-textcase="lower">${T('caseLower')}</div>
+      <div class="chip ${f.textCase==='sentence'?'active':''}" data-textcase="sentence">${T('caseSentence')}</div>
+      <div class="chip ${f.textCase==='title'?'active':''}" data-textcase="title">${T('caseTitle')}</div>
+    </div></div>`;
     html += `<div class="form-group"><label><input type="checkbox" id="pf_stretch" ${f.stretch?'checked':''} style="width:auto"> ${T('pfStretchText')}</label></div>`;
     html += `<div class="hint">${T('hintStretchText')}</div>`;
     html += `<div class="form-group"><label>${T('pfOpacity')} <span id="pf_opacityVal">${Math.round((f.opacity!=null?f.opacity:1)*100)}%</span></label>
@@ -2674,7 +2848,7 @@ function bindPropInputs(f){
       upd('fontSize', v, e.target);
     };
     $('pf_color').oninput = e => upd('color', e.target.value, e.target);
-    $('pf_uppercase').onchange = e => upd('uppercase', e.target.checked, e.target);
+    panelQuery('[data-textcase]').forEach(c => c.onclick = () => { panelQuery('[data-textcase]').forEach(x=>x.classList.remove('active')); c.classList.add('active'); upd('textCase', c.dataset.textcase, c); });
     $('pf_stretch').onchange = e => { if($('pf_valignWrap')) $('pf_valignWrap').style.display = e.target.checked ? 'none' : ''; upd('stretch', e.target.checked, e.target); };
     $('pf_opacity').oninput = e => { $('pf_opacityVal').textContent = Math.round(e.target.value*100)+'%'; upd('opacity', parseFloat(e.target.value), e.target); };
     $('pf_outline').onchange = e => { $('pf_outlineOptsText').style.display = e.target.checked ? '' : 'none'; upd('outline', e.target.checked, e.target); };
@@ -2993,7 +3167,7 @@ function buildFieldEl(f, scale, record, bleedOffPx){
 
   if(f.type==='text'){
     let text = f.dataField ? (record ? (record[f.dataField] ?? '') : `{{${f.dataField}}}`) : (f.staticText || '');
-    if(f.uppercase) text = String(text).toUpperCase();
+    text = applyTextCase(text, f.textCase);
     const fontPx = f.fontSize*scale;
     if(f.outline && (f.outlineWidth||0)>0){
       const boxWpx = Math.max(1, Math.round(f.w*scale)), boxHpx = Math.max(1, Math.round(f.h*scale));
@@ -3231,7 +3405,74 @@ function buildFieldEl(f, scale, record, bleedOffPx){
   skewXHandle.onpointerdown = e => { e.stopPropagation(); startSkewX(e, f, el); };
   skewYHandle.onpointerdown = e => { e.stopPropagation(); startSkewY(e, f, el); };
   el.onclick = e => { e.stopPropagation(); if(el.dataset.suppressClick){ delete el.dataset.suppressClick; return; } selectField(f.id, state.multiSelect); };
+  el.ondblclick = e => {
+    if(e.target===handle || e.target===rotHandle || e.target===skewXHandle || e.target===skewYHandle) return;
+    if(f.type!=='text') return;
+    e.preventDefault(); e.stopPropagation();
+    startInlineTextEdit(f, el, scale);
+  };
   return el;
+}
+// Double-click a static-text field on the canvas to edit its content directly in place, instead
+// of only through the "Static Text" input in the properties panel. Overlays a plain <textarea>
+// on top of the field-el (matching its font/color/alignment so nothing visibly jumps once
+// committed); Enter or clicking away commits, Escape cancels and reverts. Data-bound fields
+// (f.dataField set) have nothing sensible to edit here — their displayed text comes from the
+// current CSV record, not from the field itself — so double-clicking one just selects it and
+// briefly flashes the Source Data control in the properties panel instead.
+function startInlineTextEdit(f, el, scale){
+  if(f.dataField){
+    selectField(f.id);
+    const srcEl = $('pf_dataField');
+    if(srcEl){
+      srcEl.classList.remove('flash-highlight'); void srcEl.offsetWidth; // restart animation if already flashing
+      srcEl.classList.add('flash-highlight');
+      setTimeout(() => srcEl.classList.remove('flash-highlight'), 1200);
+    }
+    return;
+  }
+  if(el.classList.contains('editing')) return;
+  selectField(f.id);
+  el.classList.add('editing');
+  const visual = el.querySelector('.txt-inner, canvas');
+  if(visual) visual.style.visibility = 'hidden';
+  const ta = document.createElement('textarea');
+  ta.className = 'field-inline-edit';
+  ta.value = f.staticText || '';
+  ta.spellcheck = false;
+  ta.style.color = f.color;
+  ta.style.fontFamily = `"${f.fontFamily}"`;
+  ta.style.fontWeight = f.fontWeight;
+  ta.style.fontSize = Math.max(1, f.fontSize*scale)+'px';
+  ta.style.textAlign = f.stretch ? 'left' : f.align;
+  el.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let done = false;
+  const onBlur = () => finish(true);
+  const finish = (commit) => {
+    if(done) return; done = true;
+    ta.removeEventListener('blur', onBlur);
+    const changed = commit && ta.value !== (f.staticText||'');
+    if(changed){ pushHistoryOnce('inlineTextEdit_'+f.id); f.staticText = ta.value; }
+    ta.remove();
+    el.classList.remove('editing');
+    if(visual) visual.style.visibility = '';
+    if(changed){
+      renderStage();
+      renderFieldList();
+      if(state.selectedFieldId===f.id) renderPropPanel();
+    }
+  };
+  ta.addEventListener('blur', onBlur);
+  ta.addEventListener('pointerdown', e => e.stopPropagation());
+  ta.addEventListener('mousedown', e => e.stopPropagation());
+  ta.addEventListener('click', e => e.stopPropagation());
+  ta.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); finish(true); }
+    else if(e.key==='Escape'){ e.preventDefault(); finish(false); }
+  });
 }
 $('stage').onclick = () => { state.selectedFieldId = null; state.selectedFieldIds = []; renderFieldList(); renderPropPanel(); updateSelectionVisuals(); };
 
@@ -3699,6 +3940,23 @@ document.addEventListener('keydown', e => {
 /* ================= TOOLBAR ================= */
 $('btnZoomIn').onclick = () => { state.zoom = clamp(state.zoom+0.15, 0.3, 3); renderStage(); };
 $('btnZoomOut').onclick = () => { state.zoom = clamp(state.zoom-0.15, 0.3, 3); renderStage(); };
+$('btnZoomReset').onclick = () => { state.zoom = 1; renderStage(); };
+// Fits the card to whatever space is actually visible in the (flexible, window-size-dependent)
+// stage-wrap container, rather than assuming a fixed viewport — scalePxPerMM()'s own 500×340
+// reference box is only what "100%"/zoom=1 happens to render at, so Fit computes how much
+// further to scale that same reference size up/down to use the real available area.
+$('btnZoomFit').onclick = () => {
+  const wrap = $('stageWrap');
+  const pad = 60; // matches .stage-wrap's padding:30px (both sides)
+  const availW = Math.max(50, wrap.clientWidth - pad);
+  const availH = Math.max(50, wrap.clientHeight - pad);
+  const eff = effCardSize();
+  const fitW = 500, fitH = 340; // same reference box scalePxPerMM() uses at zoom=1
+  const baseScale = Math.min(fitW/eff.w, fitH/eff.h);
+  const baseW = eff.w*baseScale, baseH = eff.h*baseScale;
+  state.zoom = clamp(Math.min(availW/baseW, availH/baseH), 0.3, 3);
+  renderStage();
+};
 $('btnPrev').onclick = () => { if(state.data.rows.length){ state.recordIndex = (state.recordIndex-1+state.data.rows.length)%state.data.rows.length; renderStage(); } };
 $('btnNext').onclick = () => { if(state.data.rows.length){ state.recordIndex = (state.recordIndex+1)%state.data.rows.length; renderStage(); } };
 $('btnFirst').onclick = () => { if(state.data.rows.length){ state.recordIndex = 0; renderStage(); } };
@@ -3848,6 +4106,15 @@ $('keepQrVector').onchange = e => state.sheet.keepQrVector = e.target.checked;
 $('marginMM').oninput = e => state.sheet.marginMM = parseFloat(e.target.value)||0;
 $('gapXMM').oninput = e => state.sheet.gapXMM = parseFloat(e.target.value)||0;
 $('gapYMM').oninput = e => state.sheet.gapYMM = parseFloat(e.target.value)||0;
+document.querySelectorAll('#gridAlignPicker .grid-align-dot').forEach(dot => {
+  dot.onclick = () => {
+    document.querySelectorAll('#gridAlignPicker .grid-align-dot').forEach(d => d.classList.remove('active'));
+    dot.classList.add('active');
+    const val = dot.dataset.gridalign;
+    $('gridAlign').value = val;
+    state.sheet.gridAlign = val;
+  };
+});
 $('mirrorBack').onchange = e => state.sheet.mirrorBack = e.target.checked;
 document.querySelectorAll('[data-fillorder]').forEach(chip => {
   chip.onclick = () => {
@@ -4221,16 +4488,47 @@ function drawImageFit(ctx,img,x,y,w,h,fit){
     ctx.drawImage(img, dx,dy,dw,dh);
   }
 }
+// BUG FIX: a single word wider than `maxW` on its own used to just stay whole and overflow —
+// getWrappedLines() only ever broke *between* words, never inside one. But the live editor
+// preview's .txt-inner CSS rule has `word-wrap:break-word`, so the DOM preview already drops to
+// breaking mid-word whenever a whole word can't fit a line (e.g. "New" in a narrow box becomes
+// "Ne"/"w"). Canvas/PNG/vector-PDF export never did that, so an overlong word simply overflowed
+// the field's own tightly-sized canvas and got hard-clipped — the exported image showed a
+// truncated word ("Nev"/"Tex") where the editor showed it cleanly wrapped letter-by-letter. This
+// helper is used by getWrappedLines (canvas ctx.measureText — the one and only measurer for
+// wrapping now; see the BUG FIX note above getWrappedLinesMM further down for why a second,
+// fontkit-based measurer used to exist here and was removed) so wrapping falls back to the same
+// character-level split as the CSS preview, only when the word doesn't fit `maxW` by itself.
+function breakLongWord(measureFn, word, maxW){
+  let chunk = '', chunks = [];
+  for(const ch of Array.from(word)){ // Array.from iterates by code point, keeping surrogate pairs/emoji intact
+    const test = chunk + ch;
+    const w = measureFn(test);
+    if(w==null) return null;
+    if(chunk && w > maxW){ chunks.push(chunk); chunk = ch; }
+    else chunk = test;
+  }
+  if(chunk) chunks.push(chunk);
+  return chunks;
+}
 // Splits `text` into lines that fit `maxW` on `ctx`'s current font, greedily packing words —
 // shared by wrapText (drawing) and measureTextFieldGrowth (pre-measuring, so a tightly-sized
 // canvas can be grown to fit before anything is drawn instead of clipping it after the fact).
 function getWrappedLines(ctx, text, maxW){
+  const measureFn = s => ctx.measureText(s).width;
   const words = String(text).split(/\s+/);
   let line = '', lines = [];
   for(const w of words){
     const test = line ? line+' '+w : w;
-    if(ctx.measureText(test).width > maxW && line){ lines.push(line); line = w; }
-    else line = test;
+    if(measureFn(test) <= maxW){ line = test; continue; }
+    if(line){ lines.push(line); line = ''; }
+    if(measureFn(w) <= maxW){ line = w; }
+    else{
+      // word alone doesn't fit maxW — break it character-by-character (see breakLongWord above)
+      const chunks = breakLongWord(measureFn, w, maxW); // ctx.measureText never returns null
+      for(let i=0;i<chunks.length-1;i++) lines.push(chunks[i]);
+      line = chunks[chunks.length-1] || '';
+    }
   }
   if(line) lines.push(line);
   return lines;
@@ -4320,7 +4618,22 @@ function getFontAscentMM(fontWeight, fontFamily, fontSizeMM){
 // canvas/raster preview, visibly for fonts whose bounding box extends above the em-square.
 // This helper computes the correct total offset from the CSS line-box top to jsPDF's alphabetic
 // baseline in one shot: (lineH - contentH) / 2  +  fontBBAsc_alphabetic.
-function getPdfBaselineOffsetMM(fontWeight, fontFamily, fontSizeMM, lineHeightMM){
+// BUG FIX ("Embed font into PDF" text sits slightly lower than the canvas preview): this used to
+// prefer fontInfo.fkFont (fontkit's ascent/descent, read straight from the font file's `hhea`
+// table) for computing the baseline offset, falling back to the canvas measurement below only
+// when fontkit was unavailable. Same mistake as the wrap-point bug fixed above: every raster path
+// (the live .txt-inner preview, PNG export) draws with `ctx.textBaseline='top'` and lets the
+// browser position each line natively — no baseline math needed there at all. The conversion
+// below exists only for jsPDF's vector text, which draws relative to the alphabetic baseline
+// instead, so it has to exactly reproduce whatever vertical offset the browser's own 'top'
+// rendering already uses. A font's `hhea` ascent/descent (what fontkit reports) and the metrics
+// browsers actually use for CSS/canvas layout (typically the `OS/2` table's typo or win metrics)
+// are commonly different — often the hhea numbers run taller — which pushed the computed
+// baseline further down than the browser's real top-of-line-box reference, showing up as
+// embedded vector text sitting a bit lower than the same text in the canvas preview. This now
+// always measures the same way the preview does, so the vertical position matches regardless of
+// whether font embedding is on.
+function getPdfBaselineOffsetMM(fontWeight, fontFamily, fontSizeMM, lineHeightMM, fontInfo){
   const ctx = getMeasureCtx();
   ctx.font = `${fontWeight} ${fontSizeMM}px "${fontFamily}"`;
   // Measure content height (font bounding box) using textBaseline='top'
@@ -4344,9 +4657,25 @@ function getPdfBaselineOffsetMM(fontWeight, fontFamily, fontSizeMM, lineHeightMM
 // measureText on that same font). The two measurers don't always agree on where a word wraps —
 // so a vector (embedded-font) export could break a line one word earlier/later than the canvas
 // preview, which shifts every following line and shows up as "line spacing looks different in the
-// PDF". Reusing getWrappedLines() here (same "measure in mm-as-px, only the ratio matters" trick
-// as getHalfLeadMM) makes the vector path wrap at exactly the same points as everywhere else.
-function getWrappedLinesMM(f, text){
+// PDF".
+//
+// BUG FIX #2 ("Embed font into PDF" position/size mismatch): this function used to still reach
+// for fontInfo.fkFont (fontkit's raw glyph-advance-width table, read straight from the embedded
+// font's own bytes) FIRST, and only fall back to the canvas measurer below when fontkit was
+// unavailable — directly undoing the fix above. fontkit's numbers are a faithful measurement of
+// the font FILE, but the live editor preview (.txt-inner) and every raster export path have never
+// heard of fontkit — they only ever wrap using the browser's own canvas measureText on that same
+// CSS font. For most fonts the two measurers are close enough that nobody notices, but for some
+// fonts (script/handwriting faces especially) fontkit's unhinted design-unit widths disagree
+// with what the browser actually renders — and in a field narrow enough to fit only 1-2
+// characters per line, that small a disagreement is enough to flip whether a character fits,
+// producing a *different set of line breaks entirely* (not just a sub-pixel nudge) whenever
+// "Embed font into PDF" was on. Wrapping is a cliff-edge fits/doesn't-fit decision — matching
+// what the user actually sees in the editor matters more than matching the embedded font's own
+// "true" design metrics — so this now always measures wrap width the same way the preview and
+// raster paths do, so line breaks are identical
+// whether or not font embedding is enabled.
+function getWrappedLinesMM(f, text, fontInfo){
   const ctx = getMeasureCtx();
   ctx.font = `${f.fontWeight} ${f.fontSize}px "${f.fontFamily}"`; // using mm as px — only the ratio matters
   ctx.fontKerning = 'none'; // match jsPDF's non-kerned glyph spacing (see measureTextFieldGrowth)
@@ -4614,7 +4943,7 @@ async function renderCardCanvas(sideKey, record, dpi, bgOnly){
       drawShapeOnCanvas(ctx, f, fx, fy, fw, fh, mmToPxW);
     } else {
       let text = f.dataField ? (record ? (record[f.dataField] ?? '') : '') : (f.staticText||'');
-      if(f.uppercase) text = String(text).toUpperCase();
+      text = applyTextCase(text, f.textCase);
       const fontPx = f.fontSize*mmToPxH;
       ctx.font = `${f.fontWeight} ${fontPx}px "${f.fontFamily}"`;
       ctx.fontKerning = 'none'; // match jsPDF's non-kerned glyph spacing (see measureStretchNaturalSize)
@@ -4663,7 +4992,7 @@ async function renderFieldCanvas(sideKey, f, record, dpi){
   if(f.type==='text'){
     await ensureFontsLoaded(side);
     text = f.dataField ? (record ? (record[f.dataField] ?? '') : '') : (f.staticText||'');
-    if(f.uppercase) text = String(text).toUpperCase();
+    text = applyTextCase(text, f.textCase);
     const growth = measureTextFieldGrowth(f, text, mmToPx);
     padXmm = growth.padX/mmToPx; padTopMm = growth.padTop/mmToPx; padBottomMm = growth.padBottom/mmToPx;
   } else if(f.type==='image' && f.outline && (f.outlineWidth||0)>0 && (f.outlineMode||'sticker')==='sticker'){
@@ -4806,6 +5135,20 @@ function downloadCanvas(cv, filename){
   }, 'image/png');
 }
 function sanitizeFilename(s){ return String(s||FN('card')).replace(/[\/\\?%*:|"<>]/g,'_').slice(0,60); }
+// Base name for bundled exports (ZIP of PNGs, ZIP of PDFs): uses the uploaded data file's own
+// name (e.g. "data_pegawai.xlsx" → "data_pegawai") when one has been loaded, so the export is
+// easy to tell apart from other batches; falls back to the generic localized name otherwise.
+function exportBaseName(fallbackKey){
+  return state.data.sourceName || FN(fallbackKey);
+}
+// Shared "_YYYYMMDD_HHMMSS" suffix used by every export that should be stamped with the moment it
+// was generated (ZIP bundles, saved layout JSON, etc), so re-exporting later doesn't overwrite an
+// earlier download of the same name.
+function timestampSuffix(){
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
 
 /* ================= EXPORT: ZIP ================= */
 $('btnExportZip').onclick = async () => {
@@ -4835,12 +5178,27 @@ $('btnExportZip').onclick = async () => {
   setExportIndeterminate(state.lang==='en' ? 'Compressing ZIP...' : 'Mengompres ZIP...');
   const blob = await zip.generateAsync({type:'blob'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `${FN('idCardExport')}.zip`; a.click();
+  a.href = URL.createObjectURL(blob); a.download = `${exportBaseName('idCardExport')}_${timestampSuffix()}.zip`; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
   setExportProgress(state.lang==='en' ? `Done. ${rows.length} cards exported.` : `Selesai. ${rows.length} kartu diekspor.`, 1, 1);
 };
 
 /* ================= EXPORT: PDF ================= */
+// Where the whole card grid sits on the page when it doesn't exactly fill the printable area
+// (leftover space after fitting as many whole cards as possible). Defaults to centered on both
+// axes; a 9-way anchor ('top-left', 'middle-right', 'bottom-center', etc. — any combination of
+// top/middle/bottom + left/center/right) can pin it to an edge/corner instead, e.g. to keep every
+// sheet's card positions consistent against a fixed paper-cutter guide instead of drifting with
+// how many rows/cols happen to fit.
+function gridAlignOffset(gridAlign, margin, usableW, usableH, gridW, gridH){
+  const ga = gridAlign || 'center';
+  let offX = margin + (usableW-gridW)/2, offY = margin + (usableH-gridH)/2;
+  if(ga.includes('left')) offX = margin;
+  else if(ga.includes('right')) offX = margin + usableW - gridW;
+  if(ga.includes('top')) offY = margin;
+  else if(ga.includes('bottom')) offY = margin + usableH - gridH;
+  return {offX, offY};
+}
 // Builds and downloads ONE PDF file for the given slice of rows. Split out of the old
 // btnExportPdf handler so a large export can be broken into several independent jsPDF
 // documents (see PDF_EXPORT_BATCH_SIZE above) — each call here gets its own fresh jsPDF
@@ -4888,10 +5246,11 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
     }));
   }
   // Font embedding is opt-in (default off): embedding an arbitrary uploaded TTF/OTF as real PDF
-  // text relies on the browser's reported font-ascent metrics lining up with what jsPDF/fontkit
-  // actually draws, which isn't always true for every custom font file — when it's off, text
-  // stays a plain per-field raster image (see the vectorIds check below), which sidesteps that
-  // mismatch entirely at the cost of losing selectable/searchable text.
+  // text relies on the browser's reported font metrics lining up with what jsPDF actually draws
+  // from that same font file, which isn't always true for every custom font (see the BUG FIX
+  // notes above getWrappedLinesMM/getPdfBaselineOffsetMM) — when it's off, text stays a plain
+  // per-field raster image (see the vectorIds check below), which sidesteps that mismatch
+  // entirely at the cost of losing selectable/searchable text.
   const fontMap = (elementMode==='flatten' || !state.sheet.embedFontVector) ? new Map() : await ensureFontsRegisteredForExport(pdf, Array.from(pairMap.values()));
   const bleedOffMM = eff.bleed/2;
   // Tracks how many uploaded-SVG image fields ended up as real vector paths vs. had to fall
@@ -4925,10 +5284,10 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
       const [r,g,b] = hexToRgb(f.color);
       pdf.setTextColor(r,g,b);
       const lineHeightMM = f.fontSize*1.2;
-      const lines = getWrappedLinesMM(f, text);
+      const lines = getWrappedLinesMM(f, text, fontInfo);
       const fx = bleedOffMM+f.x, fy = bleedOffMM+f.y;
       const tx = f.align==='left' ? fx : f.align==='center' ? fx+f.w/2 : fx+f.w;
-      const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM);
+      const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM, fontInfo);
       const contentH = lines.length*lineHeightMM;
       const extraY = f.valign==='middle' ? (f.h-contentH)/2 : f.valign==='bottom' ? f.h-contentH : 0;
       let ty = fy + extraY;
@@ -4957,10 +5316,10 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
       const [r,g,b] = hexToRgb(f.color);
       pdf.setTextColor(r,g,b);
       const lineHeightMM = f.fontSize*1.2;
-      const lines = getWrappedLinesMM(f, text);
+      const lines = getWrappedLinesMM(f, text, fontInfo);
       const fx = bleedOffMM+f.x, fy = bleedOffMM+f.y;
       const tx = f.align==='left' ? fx : f.align==='center' ? fx+f.w/2 : fx+f.w;
-      const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM);
+      const baselineOffMM = getPdfBaselineOffsetMM(f.fontWeight, f.fontFamily, f.fontSize, lineHeightMM, fontInfo);
       const contentH = lines.length*lineHeightMM;
       const extraY = f.valign==='middle' ? (f.h-contentH)/2 : f.valign==='bottom' ? f.h-contentH : 0;
       const px = posX + cw - tx;
@@ -5092,7 +5451,7 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
       if(f.type==='text' && vectorIds.has(f.id) && !f.rotation && !f.skewX && !f.skewY && !f.flipH && !f.flipV && !f.stretch && !f.outline){
         const info = fontMap.get(f.fontFamily+'|'+f.fontWeight);
         let text = f.dataField ? (record ? (record[f.dataField] ?? '') : '') : (f.staticText||'');
-        if(f.uppercase) text = String(text).toUpperCase();
+        text = applyTextCase(text, f.textCase);
         if(rotate) drawVectorTextFieldRotated(pdf, f, text, posX, posY, info);
         else if(flip180) drawVectorTextField180(pdf, f, text, posX, posY, info);
         else drawVectorTextField(pdf, f, text, posX+bleedOffMM+f.x, posY+bleedOffMM+f.y, info);
@@ -5165,7 +5524,7 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
     const rows = Math.max(1, Math.floor((usableH+gapY)/(pairH+gapY)));
     const perPage = cols*rows;
     const gridW = cols*pairW + (cols-1)*gapX, gridH = rows*pairH + (rows-1)*gapY;
-    const offX = margin + (usableW-gridW)/2, offY = margin + (usableH-gridH)/2;
+    const {offX, offY} = gridAlignOffset(state.sheet.gridAlign, margin, usableW, usableH, gridW, gridH);
     function posFor(slot){
       let col, row;
       if(state.sheet.fillOrder === 'col'){ col = Math.floor(slot/rows); row = slot % rows; }
@@ -5203,7 +5562,7 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
     const rows = Math.max(1, Math.floor((usableH+gapY)/(ech+gapY)));
     const perPage = cols*rows;
     const gridW = cols*ecw + (cols-1)*gapX, gridH = rows*ech + (rows-1)*gapY;
-    const offX = margin + (usableW-gridW)/2, offY = margin + (usableH-gridH)/2;
+    const {offX, offY} = gridAlignOffset(state.sheet.gridAlign, margin, usableW, usableH, gridW, gridH);
     function posFor(slot, mirror){
       let col, row;
       if(state.sheet.fillOrder === 'col'){ col = Math.floor(slot/rows); row = slot % rows; }
@@ -5402,7 +5761,7 @@ $('btnExportPdf').onclick = async () => {
     setExportIndeterminate(state.lang==='en' ? 'Compressing ZIP...' : 'Mengompres ZIP...');
     const blob = await zip.generateAsync({type:'blob'});
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `${FN('idCardPrint')}.zip`; a.click();
+    a.href = URL.createObjectURL(blob); a.download = `${exportBaseName('idCardPrint')}_${timestampSuffix()}.zip`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     setExportProgress(state.lang==='en'
       ? `Done. ${exportRows.length} card(s) exported as ${batchCount} PDF file(s) bundled into one ZIP.`
@@ -5421,15 +5780,12 @@ $('btnExportPdf').onclick = async () => {
 // canvas is using instead of two independent (and possibly different) fallbacks.
 async function restoreCustomFonts(list){
   state.customFonts = [];
+  const missingFileFonts = [];
   for(const cf of (list||[])){
     const name = cf.name; if(!name) continue;
-    const bytes = cf.bytes ? base64ToArrayBuffer(cf.bytes) : null;
+    let bytes = null;
     try{
-      if(bytes){
-        const face = new FontFace(name, bytes);
-        await face.load();
-        document.fonts.add(face);
-      } else if(cf.source==='google'){
+      if(cf.source==='google'){
         const famParam = name.replace(/\s+/g,'+');
         const linkId = 'gf-' + famParam;
         if(!document.getElementById(linkId)){
@@ -5444,6 +5800,16 @@ async function restoreCustomFonts(list){
         const face = new FontFace(name, `url("${cf.url}")`);
         await face.load();
         document.fonts.add(face);
+        // Bytes weren't saved in the JSON (no base64 embed), so re-fetch them here too — this is
+        // what lets PDF export embed the real font again instead of falling back to raster.
+        try{
+          const res = await fetch(cf.url);
+          if(res.ok) bytes = await res.arrayBuffer();
+        }catch(fe){ /* CORS blocked the raw fetch — preview still works via FontFace, embedding won't */ }
+      } else {
+        // 'file' sourced fonts have no URL to re-fetch and were never embedded as base64 — the
+        // actual font data is gone and can only come back via a manual re-upload.
+        missingFileFonts.push(name);
       }
     }catch(e){
       // Font couldn't be re-registered (URL gone / CORS) — canvas will show a substitute font
@@ -5452,6 +5818,12 @@ async function restoreCustomFonts(list){
     state.customFonts.push({name, source:cf.source||'file', bytes, format:cf.format||null, url:cf.url||null});
   }
   renderCustomFontList();
+  if(missingFileFonts.length){
+    const en = state.lang==='en';
+    $('fontStatus').textContent = en
+      ? `Layout loaded. These fonts were uploaded from a file and need to be re-uploaded: ${missingFileFonts.join(', ')}. Click the 🔄 next to each one in the list below to auto-fill its name and pick the file again.`
+      : `Layout dimuat. Font berikut diupload dari file dan perlu diupload ulang: ${missingFileFonts.join(', ')}. Klik 🔄 di sebelah masing-masing pada daftar di bawah untuk mengisi otomatis namanya lalu pilih file lagi.`;
+  }
 }
 $('btnSaveLayout').onclick = () => {
   const cfg = {
@@ -5459,14 +5831,17 @@ $('btnSaveLayout').onclick = () => {
     sides: state.sides, photoField: state.photoField, filenameField: state.filenameField,
     photoSources: state.photoSources.map(s => ({id:s.id, matchField:s.matchField})),
     sheet: state.sheet,
+    // NOTE: font bytes are intentionally NOT embedded here (that used to bloat the JSON with a
+    // base64 copy of every font). Only the font's name + how to get it again is saved:
+    // 'google' fonts reload from Google Fonts, 'url' fonts re-fetch from their URL, and 'file'
+    // fonts just keep their name so restoreCustomFonts() can flag them for a manual re-upload.
     customFonts: state.customFonts.map(cf => ({
-      name: cf.name, source: cf.source, format: cf.format, url: cf.url||null,
-      bytes: cf.bytes ? arrayBufferToBase64(cf.bytes) : null
+      name: cf.name, source: cf.source, format: cf.format, url: cf.url||null
     }))
   };
   const blob = new Blob([JSON.stringify(cfg,null,2)], {type:'application/json'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `${FN('layout')}.json`; a.click();
+  a.href = URL.createObjectURL(blob); a.download = `idcardgen_v1_${timestampSuffix()}.json`; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
 };
 $('btnLoadLayout').onclick = () => $('fileLoadLayout').click();
@@ -5487,7 +5862,7 @@ $('fileLoadLayout').onchange = e => {
         const bg = state.sides[s].bg;
         if(typeof bg === 'string'){ const nb = newBg(); nb.src = bg; state.sides[s].bg = nb; }
         else if(!bg){ state.sides[s].bg = newBg(); }
-        (state.sides[s].fields||[]).forEach(f => { if((f.type==='image'||f.type==='text'||f.type==='photo') && f.opacity==null) f.opacity = 1; if(f.type==='text' && f.valign==null) f.valign = 'top'; if(f.type==='image' && f.pdfSrc===undefined) f.pdfSrc = null; if(f.type==='image' && f.outlineMode==null) f.outlineMode = 'sticker'; if(f.type==='image' && f.outlineBoxRadius==null) f.outlineBoxRadius = 0; if(f.rotation==null) f.rotation = 0; if(f.flipH==null) f.flipH = false; if(f.flipV==null) f.flipV = false; });
+        (state.sides[s].fields||[]).forEach(f => { if((f.type==='image'||f.type==='text'||f.type==='photo') && f.opacity==null) f.opacity = 1; if(f.type==='text' && f.valign==null) f.valign = 'top'; if(f.type==='text' && f.textCase==null){ f.textCase = f.uppercase ? 'upper' : 'none'; } if(f.type==='image' && f.pdfSrc===undefined) f.pdfSrc = null; if(f.type==='image' && f.outlineMode==null) f.outlineMode = 'sticker'; if(f.type==='image' && f.outlineBoxRadius==null) f.outlineBoxRadius = 0; if(f.rotation==null) f.rotation = 0; if(f.flipH==null) f.flipH = false; if(f.flipV==null) f.flipV = false; });
         if(state.sides[s].bg && state.sides[s].bg.pdfSrc===undefined) state.sides[s].bg.pdfSrc = null;
         if(state.sides[s].bg && state.sides[s].bg.color===undefined) state.sides[s].bg.color = '#ffffff';
       });
@@ -5506,6 +5881,7 @@ $('fileLoadLayout').onchange = e => {
       if(state.sheet.keepQrVector==null) state.sheet.keepQrVector = true;
       if(state.sheet.combineSides==null) state.sheet.combineSides = false;
       if(state.sheet.combineMode==null) state.sheet.combineMode = 'lr';
+      if(state.sheet.gridAlign==null) state.sheet.gridAlign = 'center';
       if(state.sheet.fillOrder==null) state.sheet.fillOrder = 'row';
       if(state.sheet.pairGapMM==null) state.sheet.pairGapMM = 5;
       if(state.sheet.rotateBack180==null) state.sheet.rotateBack180 = false;
@@ -5538,6 +5914,9 @@ $('fileLoadLayout').onchange = e => {
       $('cutGuideStyleRow').style.display = state.sheet.cutGuides ? 'flex':'none';
       document.querySelectorAll('[data-cutguidestyle]').forEach(c => c.classList.toggle('active', c.dataset.cutguidestyle===state.sheet.cutGuideStyle));
       $('paperSel').value = state.sheet.paper; $('marginMM').value = state.sheet.marginMM; $('gapXMM').value = state.sheet.gapXMM; $('gapYMM').value = state.sheet.gapYMM; $('mirrorBack').checked = state.sheet.mirrorBack;
+      const gaVal = state.sheet.gridAlign || 'center';
+      $('gridAlign').value = gaVal;
+      document.querySelectorAll('#gridAlignPicker .grid-align-dot').forEach(d => { d.classList.toggle('active', d.dataset.gridalign===gaVal); });
       $('paperCustomRow').style.display = state.sheet.paper==='custom' ? 'grid' : 'none';
       $('paperCustomW').value = state.sheet.paperCustomW; $('paperCustomH').value = state.sheet.paperCustomH;
       document.querySelectorAll('[data-orient]').forEach(c => c.classList.toggle('active', c.dataset.orient===state.sheet.orientation));
