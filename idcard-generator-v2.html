@@ -547,7 +547,9 @@ table.dtbl tr:hover td{background:var(--surface2)}
       <div class="form-group" style="margin-top:10px">
         <label for="pdfBatchSize" data-i18n="lblPdfBatchSize">Kartu per File PDF</label>
         <input type="number" id="pdfBatchSize" min="1" max="300" value="100">
+        <div class="hint" data-i18n="hintPdfBatchSize">Jika data melebihi angka ini, export PDF otomatis dipecah jadi beberapa file agar tidak gagal/hang. Default &amp; disarankan: 100.</div>
         <label style="margin-top:4px;display:inline-block"><input type="checkbox" id="pdfZipBundle" style="width:auto"> <span data-i18n="chkPdfZipBundle">Bundel jadi satu file ZIP</span></label>
+        <div class="hint" data-i18n="hintPdfZipBundle">Jika dicentang, semua file PDF hasil export (termasuk yang terpecah) digabung jadi satu unduhan .zip.</div>
       </div>
       <div class="divider"></div>
       <div class="btn-row">
@@ -668,6 +670,8 @@ id: {
   chkEmbedFont:'Embed font ke PDF (Vector)', chkKeepSvg:'Pertahankan vector untuk .svg', chkKeepPdf:'Pertahankan vector untuk .pdf', chkKeepQr:'Pertahankan vector untuk QR code',
   chkCombineSides:'Gabung depan & belakang dalam 1 lembar', chkMirrorBack:'Cerminkan halaman belakang (duplex)',
   lblPdfBatchSize:'Kartu per File PDF', chkPdfZipBundle:'Bundel jadi satu file ZIP',
+  hintPdfBatchSize:'Jika data melebihi angka ini, export PDF otomatis dipecah jadi beberapa file agar tidak gagal/hang. Default & disarankan: 100.',
+  hintPdfZipBundle:'Jika dicentang, semua file PDF hasil export (termasuk yang terpecah) digabung jadi satu unduhan .zip.',
   orientAuto:'Otomatis', orientPortrait:'Portrait', orientLandscape:'Landscape',
   rotOff:'Tidak', rotOn:'Selalu 90°', rotAuto:'Otomatis',
   modeFlatten:'🖼️ Flatten', modeLayered:'🧩 Vector + Layer',
@@ -731,6 +735,8 @@ en: {
   chkEmbedFont:'Embed font in PDF (Vector)', chkKeepSvg:'Keep vector for .svg', chkKeepPdf:'Keep vector for .pdf', chkKeepQr:'Keep vector for QR code',
   chkCombineSides:'Combine front & back on 1 sheet', chkMirrorBack:'Mirror back page (duplex)',
   lblPdfBatchSize:'Cards per PDF File', chkPdfZipBundle:'Bundle into single ZIP file',
+  hintPdfBatchSize:'If your data exceeds this number, PDF export is automatically split into several files to avoid failures/hangs. Default & recommended: 100.',
+  hintPdfZipBundle:'When checked, all exported PDF file(s) (including split parts) are combined into a single .zip download.',
   orientAuto:'Automatic', orientPortrait:'Portrait', orientLandscape:'Landscape',
   rotOff:'No', rotOn:'Always 90°', rotAuto:'Automatic',
   modeFlatten:'🖼️ Flatten', modeLayered:'🧩 Vector + Layer',
@@ -794,7 +800,7 @@ const state = {
     front: { bg:{color:'#ffffff', image:null, fit:'cover', zoom:1, offsetX:0, offsetY:0}, fields:[] },
     back: { bg:{color:'#ffffff', image:null, fit:'cover', zoom:1, offsetX:0, offsetY:0}, fields:[] }
   },
-  data: {headers:[], rows:[]},
+  data: {headers:[], rows:[], fileName:''},
   photoField: '',
   filenameField: '',
   photos: new Map(),
@@ -1051,6 +1057,10 @@ function renderSide(){
   const prevSelIds = (state.selectedFieldIds && state.selectedFieldIds.length > 1)
     ? state.selectedFieldIds.slice() : null;
   fabricCanvas.clear();
+  // Bump the render generation for this pass - see addFabricObject's
+  // isStaleRender() for why (prevents a slow-loading photo/image/qrcode
+  // from a previous render landing on the canvas after this one clears it).
+  fabricCanvas.__renderGen = (fabricCanvas.__renderGen || 0) + 1;
   const side = state.sides[state.activeSide];
   fabricCanvas.setBackgroundColor(side.bg.color, fabricCanvas.renderAll.bind(fabricCanvas));
 
@@ -1367,7 +1377,7 @@ function applyTextCase(str, textCase, isLegacyUppercase){
 
 function generateQrDataUrl(f, textVal){
   if(!window.qrcode) return '';
-  const val = textVal || 'IDCardGen';
+  const val = textVal || '';
   try {
     const qr = qrcode(0, f.ecLevel || 'M');
     qr.addData(val);
@@ -1530,7 +1540,55 @@ function createOutlinedImageElement(imgEl, f, widthPx, heightPx){
   }
 }
 
+// Re-sorts whatever is currently in `fabricCanvas`'s object stack so its
+// z-order matches side.fields' array order exactly (index 0 = bottom, last
+// index = top - same convention moveLayer() and the PDF export loop use).
+//
+// Why this is needed: addFabricObject() adds text/shape fields to the canvas
+// synchronously, but photo/image/qrcode fields only call fabricCanvas.add()
+// later, inside their Image element's onload callback. Those callbacks fire
+// whenever the browser finishes decoding each image - which has nothing to
+// do with the order the fields were requested in. A large custom image
+// upload in particular can take noticeably longer to decode than a small
+// photo thumbnail or a QR code, so it would often get added to the canvas
+// after fields that are actually above it in the layer list, making it
+// render on top when it should be underneath (or vice versa).
+//
+// Fix: after ANY field finishes being added (sync or async), re-sort the
+// whole object stack against the field order. Regardless of what order the
+// async callbacks fire in, the canvas converges on the correct final order
+// once everything has loaded - and each intermediate re-sort keeps things
+// looking as correct as possible while a slow image is still decoding.
+function reorderCanvasLayers(){
+  if(!fabricCanvas) return;
+  const side = state.sides[state.activeSide];
+  if(!side) return;
+  const orderMap = new Map();
+  side.fields.forEach((f, idx) => orderMap.set(f.id, idx));
+  const objs = fabricCanvas.getObjects().slice();
+  const rank = (obj) => (obj.fieldId !== undefined && orderMap.has(obj.fieldId)) ? orderMap.get(obj.fieldId) : -1;
+  objs.sort((a, b) => rank(a) - rank(b));
+  objs.forEach((obj, idx) => fabricCanvas.moveTo(obj, idx));
+  fabricCanvas.requestRenderAll ? fabricCanvas.requestRenderAll() : fabricCanvas.renderAll();
+}
+
 function addFabricObject(f){
+  return new Promise((resolve) => {
+  // Snapshot which canvas + render-pass this call belongs to. renderSide()
+  // bumps fabricCanvas.__renderGen every time it starts a fresh render (e.g.
+  // when a field's data-bound column is changed via the property panel and
+  // the whole side re-renders). Text/shape fields resolve synchronously
+  // within the same pass so this can never go stale for them, but photo/
+  // image/qrcode fields only call fabricCanvas.add() later, inside their
+  // Image element's onload. If the user triggers another renderSide() (or
+  // switches side/record) before that fires, the stale callback would still
+  // add its (now outdated) object onto the freshly-cleared canvas - showing
+  // up as a duplicate ("double") element sitting on top of the correct one.
+  // Checking the snapshot in each onload callback below and bailing out if
+  // it no longer matches closes that gap.
+  const _canvasRef = fabricCanvas;
+  const _renderGen = _canvasRef ? (_canvasRef.__renderGen || 0) : 0;
+  const isStaleRender = () => (fabricCanvas !== _canvasRef) || (_canvasRef.__renderGen || 0) !== _renderGen;
   let obj = null;
   const bleedMM = parseFloat(state.card.bleedMM) || 0;
   const leftPx = (f.x + bleedMM) * SCALE_FACTOR;
@@ -1630,6 +1688,7 @@ function addFabricObject(f){
     
     const imgEl = new Image();
     imgEl.onload = () => {
+      if(isStaleRender()){ resolve(); return; }
       const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
       const fabImg = new fabric.Image(rendered.element, {
         left: leftPx + rendered.offsetX,
@@ -1646,11 +1705,14 @@ function addFabricObject(f){
       });
       fabImg.fieldData = f;
       fabricCanvas.add(fabImg);
+      reorderCanvasLayers();
       if(state.selectedFieldId === f.id){
         fabricCanvas.setActiveObject(fabImg);
       }
       fabricCanvas.renderAll();
+      resolve();
     };
+    imgEl.onerror = () => resolve();
     imgEl.src = photoDataUrl || placeholderSvg;
     return;
   } else if(f.type === 'image'){
@@ -1658,6 +1720,7 @@ function addFabricObject(f){
     
     const imgEl = new Image();
     imgEl.onload = () => {
+      if(isStaleRender()){ resolve(); return; }
       const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
       const fabImg = new fabric.Image(rendered.element, {
         left: leftPx + rendered.offsetX,
@@ -1674,18 +1737,22 @@ function addFabricObject(f){
       });
       fabImg.fieldData = f;
       fabricCanvas.add(fabImg);
+      reorderCanvasLayers();
       if(state.selectedFieldId === f.id){
         fabricCanvas.setActiveObject(fabImg);
       }
       fabricCanvas.renderAll();
+      resolve();
     };
+    imgEl.onerror = () => resolve();
     imgEl.src = f.src || placeholderImg;
     return;
   } else if(f.type === 'qrcode'){
-    const val = getFieldValue(f) || 'IDCardGen';
+    const val = getFieldValue(f) || '';
     const qrDataUrl = generateQrDataUrl(f, val);
     const imgEl = new Image();
     imgEl.onload = () => {
+      if(isStaleRender()){ resolve(); return; }
       const fabImg = new fabric.Image(imgEl, {
         left: leftPx,
         top: topPx,
@@ -1701,11 +1768,14 @@ function addFabricObject(f){
       });
       fabImg.fieldData = f;
       fabricCanvas.add(fabImg);
+      reorderCanvasLayers();
       if(state.selectedFieldId === f.id){
         fabricCanvas.setActiveObject(fabImg);
       }
       fabricCanvas.renderAll();
+      resolve();
     };
+    imgEl.onerror = () => resolve();
     imgEl.src = qrDataUrl;
     return;
   } else if(f.type === 'shape'){
@@ -1839,11 +1909,97 @@ function addFabricObject(f){
       skewY: f.skewY || 0,
       flipX: !!f.flipH,
       flipY: !!f.flipV,
+      // Text/photo/image/qrcode already set opacity in their own constructor
+      // above, but shape fields never did - so on any full canvas rebuild
+      // (JSON load, undo/redo, switching sides) shapes silently snapped back
+      // to fully opaque, even though f.opacity was saved/loaded correctly.
+      // Setting it here too, for every type, closes that gap for good.
+      opacity: f.opacity !== undefined ? f.opacity : 1,
       fieldId: f.id
     });
     obj.fieldData = f;
     fabricCanvas.add(obj);
+    reorderCanvasLayers();
     fabricCanvas.renderAll();
+  }
+  resolve();
+  }); // end Promise wrapper - resolves synchronously here for text/shape;
+      // photo/image/qrcode branches resolve() their own promise from
+      // inside imgEl.onload/onerror above (see their `return;` earlier)
+}
+
+// Renders one card side for ONE record onto a brand-new, detached
+// fabric.StaticCanvas (never attached to the DOM, never the visible
+// `fabricCanvas`), and returns a PNG data URL. This is what v1's plain-canvas
+// `renderCardCanvas()` does natively; v2 is fabric-based, so the equivalent
+// here is a StaticCanvas built with the exact same field-drawing code
+// (addFabricObject) the live editor uses - just pointed at a throwaway
+// canvas instead. Bulk export (ZIP / flattened PDF) can now rasterize every
+// record without ever touching the on-screen stage, so there's nothing to
+// hide and nothing to flicker.
+async function renderCardOffscreen(sideKey, recordIdx, multiplier){
+  const savedCanvas = fabricCanvas;
+  const savedActiveSide = state.activeSide;
+  const savedRecordIndex = state.recordIndex;
+
+  state.activeSide = sideKey;
+  state.recordIndex = recordIdx;
+
+  const side = state.sides[sideKey];
+  const bleedMM = parseFloat(state.card.bleedMM) || 0;
+  const totalWmm = state.card.wMM + bleedMM * 2;
+  const totalHmm = state.card.hMM + bleedMM * 2;
+  const wPx = Math.round(totalWmm * SCALE_FACTOR);
+  const hPx = Math.round(totalHmm * SCALE_FACTOR);
+
+  const off = new fabric.StaticCanvas(null, { width: wPx, height: hPx, enableRetinaScaling: false });
+  off.__renderGen = 1;
+  fabricCanvas = off; // addFabricObject() (and the bg logic below) both read the
+                       // module-level `fabricCanvas` var - redirecting it here is
+                       // what keeps this fully reusing that code with zero duplication.
+
+  try {
+    await new Promise((resolve) => {
+      off.setBackgroundColor(side.bg.color || '#ffffff', () => resolve());
+    });
+
+    if(side.bg.image){
+      await new Promise((resolve) => {
+        const bgImg = new Image();
+        bgImg.onload = () => {
+          const containerW = totalWmm * SCALE_FACTOR;
+          const containerH = totalHmm * SCALE_FACTOR;
+          const imgW = bgImg.width, imgH = bgImg.height;
+          const zoom = side.bg.zoom || 1;
+          let scaleX = 1, scaleY = 1;
+          if(side.bg.fit === 'stretch'){
+            scaleX = (containerW / imgW) * zoom; scaleY = (containerH / imgH) * zoom;
+          } else if(side.bg.fit === 'contain'){
+            const s = Math.min(containerW / imgW, containerH / imgH) * zoom; scaleX = s; scaleY = s;
+          } else {
+            const s = Math.max(containerW / imgW, containerH / imgH) * zoom; scaleX = s; scaleY = s;
+          }
+          const baseLeft = (containerW - imgW * scaleX) / 2;
+          const baseTop = (containerH - imgH * scaleY) / 2;
+          const left = baseLeft + (side.bg.offsetX || 0) * SCALE_FACTOR;
+          const top = baseTop + (side.bg.offsetY || 0) * SCALE_FACTOR;
+          const fabBg = new fabric.Image(bgImg, { left, top, scaleX, scaleY, selectable: false, evented: false });
+          off.setBackgroundImage(fabBg, () => resolve());
+        };
+        bgImg.onerror = () => resolve();
+        bgImg.src = side.bg.image;
+      });
+    }
+
+    await Promise.all(side.fields.map(f => addFabricObject(f)));
+    off.renderAll();
+    const dataUrl = off.toDataURL({ format: 'png', multiplier: multiplier || 2 });
+    return dataUrl;
+  } finally {
+    off.dispose();
+    fabricCanvas = savedCanvas;
+    state.activeSide = savedActiveSide;
+    state.recordIndex = savedRecordIndex;
   }
 }
 
@@ -3107,7 +3263,7 @@ $('fileImageEl').onchange = e => {
 
 $('btnAddQr').onclick = () => {
   saveHistory();
-  const f = { id:uid(), type:'qrcode', x:50, y:20, w:20, h:20, staticText:'IDCardGen', ecLevel:'M', fg:'#000000', bg:'#ffffff', transparentBg:true, quietModules:4 };
+  const f = { id:uid(), type:'qrcode', x:50, y:20, w:20, h:20, staticText:'', ecLevel:'M', fg:'#000000', bg:'#ffffff', transparentBg:true, quietModules:4 };
   state.sides[state.activeSide].fields.push(f);
   renderSide();
   selectFabricObject(f.id);
@@ -3150,6 +3306,7 @@ function loadDataFile(file){
       if(json.length > 0){
         state.data.headers = json[0].map(h => String(h).trim());
         state.data.rows = [];
+        state.data.fileName = file.name.substring(0, file.name.lastIndexOf('.') > 0 ? file.name.lastIndexOf('.') : file.name.length);
         for(let i=1; i<json.length; i++){
           if(json[i].length === 0) continue;
           const rowObj = {};
@@ -3826,29 +3983,81 @@ function updateStats(){
 }
 
 /* VECTOR PDF EXPORT (pdf-lib + fontkit) */
+// Bulk export (PDF / ZIP) used to temporarily set state.recordIndex to every
+// row in turn and call renderSide() on the live, on-screen Fabric canvas to
+// rasterize each record - which made the editor visibly flip through every
+// merged record while exporting, and had to be papered over by hiding the
+// stage for the duration (see renderCardOffscreen() below for the real fix:
+// every record is now rasterized on a detached StaticCanvas instead, so the
+// live canvas is never touched during a bulk export in the first place).
+// These two helpers just save/restore state.recordIndex for callers that
+// still read it after the export loop runs.
+function beginSilentBulkRender(){
+  return state.recordIndex;
+}
+function endSilentBulkRender(savedRecordIndex){
+  state.recordIndex = savedRecordIndex;
+}
+
+// Reads and validates the "Cards per PDF File" input (#pdfBatchSize), clamping to a sane
+// range so a stray value (blank/0/huge) can't break the split or defeat its purpose.
+function getPdfBatchSize(){
+  const raw = parseInt(state.pdfBatchSize, 10);
+  if(!raw || raw < 1) return 100;
+  return Math.min(raw, 300);
+}
+
 $('btnExportPdf').onclick = async () => {
   if(!window.PDFLib){
     alert(T('errPdfLibNotLoaded'));
     return;
   }
-  
-  let startIdx = 0;
-  let endIdx = state.data.rows.length ? state.data.rows.length - 1 : 0;
+
+  let scopeStartIdx = 0;
+  let scopeEndIdx = state.data.rows.length ? state.data.rows.length - 1 : 0;
   if(state.exportScope === 'current'){
-    startIdx = state.recordIndex;
-    endIdx = state.recordIndex;
+    scopeStartIdx = state.recordIndex;
+    scopeEndIdx = state.recordIndex;
   } else if(state.exportScope === 'range'){
-    startIdx = Math.max(0, parseInt($('exportRangeFrom').value) - 1);
-    endIdx = Math.min((state.data.rows.length || 1) - 1, parseInt($('exportRangeTo').value) - 1);
+    scopeStartIdx = Math.max(0, parseInt($('exportRangeFrom').value) - 1);
+    scopeEndIdx = Math.min((state.data.rows.length || 1) - 1, parseInt($('exportRangeTo').value) - 1);
   }
 
-  const totalToExport = endIdx - startIdx + 1;
+  const scopeTotal = scopeEndIdx - scopeStartIdx + 1;
+  const batchSize = getPdfBatchSize();
+  const zipBundle = !!(state.pdfZipBundle && $('pdfZipBundle') && $('pdfZipBundle').checked);
+  const batchCount = Math.max(1, Math.ceil(scopeTotal / batchSize));
+  if(zipBundle && !window.JSZip){
+    alert(T('errJsZipNotLoaded'));
+    return;
+  }
+  const zip = zipBundle ? new JSZip() : null;
+  const batchPad = String(batchCount).length;
+
+  // Same naming convention as the PNG ZIP export: prefix with the uploaded data
+  // file's name (sans extension) when available, otherwise a generic fallback,
+  // followed by a readable local date/time stamp.
+  const _now = new Date();
+  const _pad2 = n => String(n).padStart(2, '0');
+  const dateStamp = `${_now.getFullYear()}${_pad2(_now.getMonth() + 1)}${_pad2(_now.getDate())}_${_pad2(_now.getHours())}${_pad2(_now.getMinutes())}${_pad2(_now.getSeconds())}`;
+  const pdfBaseName = state.data.fileName ? state.data.fileName : 'kartu_id_pdf';
+
   const paperKey = $('paperSel').value;
   const paper = PAPER[paperKey] || { w: parseFloat($('paperCustomW').value), h: parseFloat($('paperCustomH').value) };
-  
-  showExportProgress(T('msgCreatingPdf'), 0, totalToExport);
-  
+
+  showExportProgress(T('msgCreatingPdf'), 0, scopeTotal);
+  const _savedRecordIndexForExport = beginSilentBulkRender();
+
   try {
+   for(let batchIdx = 0; batchIdx < batchCount; batchIdx++){
+    let startIdx = scopeStartIdx + batchIdx * batchSize;
+    let endIdx = Math.min(scopeEndIdx, startIdx + batchSize - 1);
+    const totalToExport = endIdx - startIdx + 1;
+    const partLabel = String(batchIdx + 1).padStart(batchPad, '0');
+    const outFilename = batchCount <= 1
+      ? `${pdfBaseName}_${dateStamp}.pdf`
+      : `${pdfBaseName}_${dateStamp}_part_${partLabel}_of_${batchCount}.pdf`;
+
     const pdfDoc = await PDFLib.PDFDocument.create();
     if(window.fontkit){
       pdfDoc.registerFontkit(window.fontkit);
@@ -4067,8 +4276,16 @@ $('btnExportPdf').onclick = async () => {
     // shaped x/y offset, instead of letting pdf-lib draw the whole string as one
     // unkerned Tj run. Falls back to a plain page.drawText() when shaping isn't
     // usable (no matching fkFont, ligatures, standard fonts, etc.).
+    //
+    // IMPORTANT: `opacity` here is passed straight through to pdf-lib as-is
+    // (no default-to-1 substitution). When a field's opacity has already been
+    // applied once via withOpacityGState() below, callers pass `opacity:
+    // undefined` for every glyph so pdf-lib doesn't emit its own per-glyph
+    // ExtGState - see withOpacityGState's comment for why per-glyph opacity
+    // is unsafe. `opacity` only carries an explicit numeric value in the rare
+    // fallback path where wrapping itself failed.
     const drawKernedText = (page, text, opts) => {
-      const { x, y, size, font, fkFont, color } = opts;
+      const { x, y, size, font, fkFont, color, opacity } = opts;
       if(!text){ return; }
       try {
         const shaped = shapeKernedRun(fkFont, text);
@@ -4078,13 +4295,55 @@ $('btnExportPdf').onclick = async () => {
             const pos = shaped.positions[i];
             const gx = cursorX + (pos.xOffset / shaped.unitsPerEm) * size;
             const gy = y + (pos.yOffset / shaped.unitsPerEm) * size;
-            page.drawText(shaped.chars[i], { x: gx, y: gy, size, font, color });
+            page.drawText(shaped.chars[i], { x: gx, y: gy, size, font, color, opacity });
             cursorX += (pos.xAdvance / shaped.unitsPerEm) * size;
           }
           return;
         }
       } catch(e){}
-      page.drawText(text, { x, y, size, font, color });
+      page.drawText(text, { x, y, size, font, color, opacity });
+    };
+
+    // Applies a field's opacity ONCE via a shared PDF ExtGState wrapped around
+    // every draw call inside drawFn, instead of passing `opacity` to each
+    // individual page.drawText()/page.drawImage() call separately (mirrors the
+    // v1 exporter's "save GState, draw, restore" approach for opacity).
+    //
+    // Why this matters: pdf-lib's per-call `opacity` option makes EACH draw
+    // its own independent semi-transparent layer. That's harmless for a single
+    // shape, but drawKernedText draws one glyph at a time to get real OpenType
+    // kerning - if per-glyph opacity was used, any two glyphs whose ink
+    // overlaps even slightly (tight kerning pairs, italic slants, ligature-like
+    // pairs such as "fi"/"ff") would blend their alpha TWICE at the overlap,
+    // producing a visibly darker seam right where they touch. Wrapping the
+    // whole run in one shared GState makes every glyph share a single
+    // transparency layer instead, so overlapping ink blends once - exactly
+    // like a single object's fill+stroke would.
+    let _opacityGStateCounter = 0;
+    const withOpacityGState = (page, opacity, drawFn) => {
+      const op = (opacity === undefined || opacity === null) ? 1 : opacity;
+      if(op >= 1){ drawFn(undefined); return; }
+      let wrapped = false;
+      try {
+        if(typeof PDFLib.setGraphicsState === 'function' && page.node && typeof page.node.setExtGState === 'function'){
+          const gsDict = pdfDoc.context.obj({ Type: 'ExtGState', ca: op, CA: op });
+          const gsRef = pdfDoc.context.register(gsDict);
+          const gsName = PDFLib.PDFName.of('GsOp' + (_opacityGStateCounter++));
+          page.node.setExtGState(gsName, gsRef);
+          page.pushOperators(PDFLib.pushGraphicsState(), PDFLib.setGraphicsState(gsName));
+          wrapped = true;
+        }
+      } catch(e){
+        console.warn('Opacity GState wrap failed, falling back to per-draw opacity', e);
+        wrapped = false;
+      }
+      try {
+        drawFn(wrapped ? undefined : op);
+      } finally {
+        if(wrapped){
+          try { page.pushOperators(PDFLib.popGraphicsState()); } catch(e){}
+        }
+      }
     };
 
     const getWrappedLines = (textStr, font, fkFont, fontSizePt, maxWpt) => {
@@ -4140,6 +4399,7 @@ $('btnExportPdf').onclick = async () => {
         fontWeight: f.fontWeight || 'normal',
         fontSize: (f.fontSize || 4) * RES,
         fill: f.color || '#111111',
+        opacity: f.opacity !== undefined ? f.opacity : 1,
         textAlign: f.align || 'left',
         width: Math.max(1, (f.w || 1) * RES),
         scaleX: f.scaleX || 1,
@@ -4301,6 +4561,7 @@ $('btnExportPdf').onclick = async () => {
 
       obj.set({
         angle: f.rotation || 0, skewX: f.skewX || 0, skewY: f.skewY || 0,
+        opacity: f.opacity !== undefined ? f.opacity : 1,
         originX: 'center', originY: 'center', left: 0, top: 0
       });
       tmp.add(obj);
@@ -4518,8 +4779,7 @@ $('btnExportPdf').onclick = async () => {
       state.activeSide = sideKey;
 
       if(isFlatten){
-        renderSide();
-        const dataUrl = fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
+        const dataUrl = await renderCardOffscreen(sideKey, r);
         const pngImage = await pdfDoc.embedPng(dataUrl);
         targetPage.drawImage(pngImage, { x: cardX, y: cardY, width: cardWpt, height: cardHpt });
       } else {
@@ -4586,29 +4846,36 @@ $('btnExportPdf').onclick = async () => {
 
                 const topEdgePt = cardY + cardHpt - mmToPt(f.y + bleedMM);
                 const lineHeightPt = fontSizePt * 1.2;
+                const fieldOpacity = f.opacity !== undefined ? f.opacity : 1;
 
-                linesToDraw.forEach((lineText, lineIdx) => {
-                  let textX = fX;
-                  try {
-                    const textW = measureKernedWidth(lineText || '', fkFont, fontSizePt, font);
-                    if(f.align === 'center'){
-                      textX = fX + (fW - textW) / 2;
-                    } else if(f.align === 'right'){
-                      textX = fX + fW - textW;
-                    }
-                  } catch(e){}
+                // Opacity is applied ONCE for the whole field (all lines, all
+                // glyphs) via withOpacityGState, not per glyph - see that
+                // helper's comment for why per-glyph opacity is unsafe.
+                withOpacityGState(targetPage, fieldOpacity, (perDrawOpacity) => {
+                  linesToDraw.forEach((lineText, lineIdx) => {
+                    let textX = fX;
+                    try {
+                      const textW = measureKernedWidth(lineText || '', fkFont, fontSizePt, font);
+                      if(f.align === 'center'){
+                        textX = fX + (fW - textW) / 2;
+                      } else if(f.align === 'right'){
+                        textX = fX + fW - textW;
+                      }
+                    } catch(e){}
 
-                  const rawAscentRatio = (fkFont && fkFont.unitsPerEm) ? (fkFont.ascent / fkFont.unitsPerEm) : 0.78;
-                  // Blend: mostly the fixed 0.78 baseline that matches the canvas editor's
-                  // own approximation, with a small nudge from the real font metrics so
-                  // fonts with unusually tall/short ascent still get partially corrected
-                  // without overshooting (raw font ascent tends to include extra headroom
-                  // for accents/diacritics that isn't visually present in most text).
-                  const ascentRatio = 0.78 * 0.75 + rawAscentRatio * 0.25;
-                  const lineY = topEdgePt - fontSizePt * ascentRatio - lineIdx * lineHeightPt;
-                  drawKernedText(targetPage, lineText || '', {
-                    x: textX, y: lineY, size: fontSizePt, font, fkFont,
-                    color: PDFLib.rgb(tR/255, tG/255, tB/255)
+                    const rawAscentRatio = (fkFont && fkFont.unitsPerEm) ? (fkFont.ascent / fkFont.unitsPerEm) : 0.78;
+                    // Blend: mostly the fixed 0.78 baseline that matches the canvas editor's
+                    // own approximation, with a small nudge from the real font metrics so
+                    // fonts with unusually tall/short ascent still get partially corrected
+                    // without overshooting (raw font ascent tends to include extra headroom
+                    // for accents/diacritics that isn't visually present in most text).
+                    const ascentRatio = 0.78 * 0.75 + rawAscentRatio * 0.25;
+                    const lineY = topEdgePt - fontSizePt * ascentRatio - lineIdx * lineHeightPt;
+                    drawKernedText(targetPage, lineText || '', {
+                      x: textX, y: lineY, size: fontSizePt, font, fkFont,
+                      color: PDFLib.rgb(tR/255, tG/255, tB/255),
+                      opacity: perDrawOpacity
+                    });
                   });
                 });
               } catch(err){
@@ -4659,7 +4926,9 @@ $('btnExportPdf').onclick = async () => {
                 x: fX, y: fY, width: fW, height: fH,
                 color: PDFLib.rgb(fillR/255, fillG/255, fillB/255),
                 borderColor: stWpt > 0 ? PDFLib.rgb(stR/255, stG/255, stB/255) : undefined,
-                borderWidth: stWpt
+                borderWidth: stWpt,
+                opacity: f.opacity !== undefined ? f.opacity : 1,
+                borderOpacity: f.opacity !== undefined ? f.opacity : 1
               });
             }
           } else if(f.type === 'photo' || f.type === 'image' || f.type === 'qrcode'){
@@ -4675,12 +4944,23 @@ $('btnExportPdf').onclick = async () => {
             } else if(f.type === 'image'){
               imgDataUrl = f.src;
             } else if(f.type === 'qrcode'){
-              const val = getFieldValue(f) || 'IDCardGen';
+              // Use the same generator the live canvas preview uses
+              // (generateQrDataUrl), instead of calling the qrcode library
+              // directly. Two bugs this fixes:
+              //  1) qr.createDataURL() returns a "data:image/gif;base64,..."
+              //     URI, but the embed check just below only recognizes
+              //     "data:image/png" / "data:image/jpeg" prefixes. Whenever
+              //     the QR field didn't need flattening (no outline/skew/
+              //     rotation/flip - the common case), the GIF matched
+              //     neither prefix and was silently dropped, so the QR simply
+              //     never got drawn onto the PDF page.
+              //  2) It also ignored the field's own fg/bg/transparentBg/
+              //     quietModules/ecLevel settings (ecLevel was hardcoded to
+              //     'M'), so even when it did render, it didn't match what
+              //     the editor showed.
+              const val = getFieldValue(f) || '';
               try {
-                const qr = qrcode(0, 'M');
-                qr.addData(val);
-                qr.make();
-                imgDataUrl = qr.createDataURL(4, 0);
+                imgDataUrl = generateQrDataUrl(f, val);
               } catch(e){}
             }
 
@@ -4709,12 +4989,40 @@ $('btnExportPdf').onclick = async () => {
             }
 
             if(!imgFlattened && imgDataUrl){
+              const imgOpacity = f.opacity !== undefined ? f.opacity : 1;
               if(imgDataUrl.startsWith('data:image/png')){
                 const pngImage = await pdfDoc.embedPng(imgDataUrl);
-                targetPage.drawImage(pngImage, { x: fX, y: fY, width: fW, height: fH });
+                targetPage.drawImage(pngImage, { x: fX, y: fY, width: fW, height: fH, opacity: imgOpacity });
               } else if(imgDataUrl.startsWith('data:image/jpeg')){
                 const jpgImage = await pdfDoc.embedJpg(imgDataUrl);
-                targetPage.drawImage(jpgImage, { x: fX, y: fY, width: fW, height: fH });
+                targetPage.drawImage(jpgImage, { x: fX, y: fY, width: fW, height: fH, opacity: imgOpacity });
+              } else if(imgDataUrl.startsWith('data:image/')){
+                // Any other raster format (webp, gif, bmp, etc. from a custom
+                // image upload) - pdf-lib can only embed PNG or JPEG bytes
+                // directly, so without this branch these would silently
+                // vanish from the export with no error, the same way QR
+                // codes used to (see the qrcode branch above for that fix).
+                // Convert through a canvas to PNG first instead of dropping it.
+                try {
+                  const converted = await new Promise((res) => {
+                    const convImg = new Image();
+                    convImg.onload = () => {
+                      const c = document.createElement('canvas');
+                      c.width = convImg.naturalWidth || convImg.width || 1;
+                      c.height = convImg.naturalHeight || convImg.height || 1;
+                      c.getContext('2d').drawImage(convImg, 0, 0);
+                      res(c.toDataURL('image/png'));
+                    };
+                    convImg.onerror = () => res(null);
+                    convImg.src = imgDataUrl;
+                  });
+                  if(converted){
+                    const pngImage = await pdfDoc.embedPng(converted);
+                    targetPage.drawImage(pngImage, { x: fX, y: fY, width: fW, height: fH, opacity: imgOpacity });
+                  }
+                } catch(e){
+                  console.warn('Could not convert image field ' + f.id + ' to PNG for export', e);
+                }
               }
             }
           }
@@ -4753,9 +5061,9 @@ $('btnExportPdf').onclick = async () => {
       return { cardX, cardY };
     };
 
-    const totalToExport = endIdx - startIdx + 1;
     const sheetCount = Math.ceil(totalToExport / perPage);
     const grandTotal = state.doubleSided ? totalToExport * 2 : totalToExport;
+    const batchLabel = batchCount > 1 ? ` [${partLabel}/${batchCount}]` : '';
 
     let cardsProcessed = 0;
     for(let s = 0; s < sheetCount; s++){
@@ -4766,7 +5074,7 @@ $('btnExportPdf').onclick = async () => {
       const frontPage = pdfDoc.addPage([paperWpt, paperHpt]);
       for(let r = sheetStart; r <= sheetEnd; r++){
         cardsProcessed++;
-        setExportProgress(`${T('msgProcessingCard')} (${T('tabFront')}) ${cardsProcessed} / ${grandTotal}...`, cardsProcessed, grandTotal);
+        setExportProgress(`${T('msgProcessingCard')} (${T('tabFront')})${batchLabel} ${cardsProcessed} / ${grandTotal}...`, cardsProcessed, grandTotal);
         await new Promise(r => setTimeout(r, 0));
         const slotIdx = r - sheetStart;
         const pos = posFor(slotIdx, false);
@@ -4780,7 +5088,7 @@ $('btnExportPdf').onclick = async () => {
         const mirror = !!state.sheet.mirrorBack;
         for(let r = sheetStart; r <= sheetEnd; r++){
           cardsProcessed++;
-          setExportProgress(`${T('msgProcessingCard')} (${T('tabBack')}) ${cardsProcessed} / ${grandTotal}...`, cardsProcessed, grandTotal);
+          setExportProgress(`${T('msgProcessingCard')} (${T('tabBack')})${batchLabel} ${cardsProcessed} / ${grandTotal}...`, cardsProcessed, grandTotal);
           await new Promise(r => setTimeout(r, 0));
           const slotIdx = r - sheetStart;
           const pos = posFor(slotIdx, mirror);
@@ -4791,18 +5099,44 @@ $('btnExportPdf').onclick = async () => {
     }
 
     const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `kartu_id_export_${Date.now()}.pdf`;
-    link.click();
+    if(zip){
+      zip.file(outFilename, pdfBytes);
+    } else {
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = outFilename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+    // Let the tab breathe / release memory between batches before starting the next pdf-lib doc.
+    if(batchCount > 1) await new Promise(r => setTimeout(r, 50));
+   } // end batch loop
 
-    setExportProgress(T('msgPdfExportDone'), 100, 100);
+    if(zip){
+      setExportProgress(state.lang === 'en' ? 'Compressing ZIP...' : 'Mengompres ZIP...', 100, 100);
+      const zipBlob = await zip.generateAsync({type:'blob'});
+      const zlink = document.createElement('a');
+      zlink.href = URL.createObjectURL(zipBlob);
+      zlink.download = `${pdfBaseName}_${dateStamp}.zip`;
+      zlink.click();
+      URL.revokeObjectURL(zlink.href);
+    }
+
+    let doneMsg = T('msgPdfExportDone');
+    if(batchCount > 1){
+      doneMsg = state.lang === 'en'
+        ? `Done. Export was split into ${batchCount} PDF files${zip ? ' bundled into one ZIP' : ''} — check your downloads.`
+        : `Selesai. Export dipecah jadi ${batchCount} file PDF${zip ? ', digabung jadi satu ZIP' : ''} — cek folder unduhan.`;
+    }
+    setExportProgress(doneMsg, 100, 100);
     setTimeout(() => $('exportProgressWrap').style.display = 'none', 3000);
   } catch(err){
     alert(T('errExportPdf') + err.message);
     console.error(err);
     $('exportProgressWrap').style.display = 'none';
+  } finally {
+    endSilentBulkRender(_savedRecordIndexForExport);
   }
 };
 
@@ -4841,31 +5175,38 @@ $('btnExportZip').onclick = async () => {
   const total = state.data.rows.length || 1;
   showExportProgress(T('msgCreatingZip'), 0, total);
 
-  const savedIdx = state.recordIndex;
-  for(let i=0; i<total; i++){
-    state.recordIndex = i;
-    renderSide();
-    await new Promise(r => setTimeout(r, 50));
-    const dataUrl = fabricCanvas.toDataURL({ format: 'png', multiplier: 2 });
-    const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
-    const filename = state.filenameField && state.data.rows[i] && state.data.rows[i][state.filenameField] 
-      ? `${state.data.rows[i][state.filenameField]}.png` 
-      : `kartu_${i+1}.png`;
-    zip.file(filename, base64Data, {base64: true});
-    setExportProgress(`${T('msgProcessingCard')} ${i+1} / ${total}...`, i+1, total);
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dateStamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+  const savedIdx = beginSilentBulkRender();
+  try {
+    for(let i=0; i<total; i++){
+      const dataUrl = await renderCardOffscreen(state.activeSide, i);
+      const base64Data = dataUrl.replace(/^data:image\/png;base64,/, '');
+      const filename = state.filenameField && state.data.rows[i] && state.data.rows[i][state.filenameField]
+        ? `${state.data.rows[i][state.filenameField]}.png`
+        : `kartu_${i+1}.png`;
+      zip.file(filename, base64Data, {base64: true});
+      setExportProgress(`${T('msgProcessingCard')} ${i+1} / ${total}...`, i+1, total);
+    }
+
+    const content = await zip.generateAsync({type:'blob'});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    const zipBaseName = state.data.fileName ? state.data.fileName : 'kartu_id_png';
+    link.download = `${zipBaseName}_${dateStamp}.zip`;
+    link.click();
+
+    setExportProgress(T('msgZipExportDone'), 100, 100);
+    setTimeout(() => $('exportProgressWrap').style.display = 'none', 3000);
+  } catch(err){
+    alert(T('errExportPdf') + err.message);
+    console.error(err);
+    $('exportProgressWrap').style.display = 'none';
+  } finally {
+    endSilentBulkRender(savedIdx);
   }
-
-  state.recordIndex = savedIdx;
-  renderSide();
-
-  const content = await zip.generateAsync({type:'blob'});
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(content);
-  link.download = `kartu_id_png_${Date.now()}.zip`;
-  link.click();
-
-  setExportProgress(T('msgZipExportDone'), 100, 100);
-  setTimeout(() => $('exportProgressWrap').style.display = 'none', 3000);
 };
 
 // Save & Load Layout JSON

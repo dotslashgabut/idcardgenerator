@@ -338,7 +338,7 @@ body.dragging-el,body.dragging-el *{user-select:none!important}
       <div class="card-title"><div class="t" data-i18n="cardCustomFont">Font Kustom</div></div>
       <div class="form-group">
         <label data-i18n="lblUploadFont">Upload File Font (.ttf/.otf/.woff/.woff2)</label>
-        <input type="text" id="fontFileNameTarget" data-i18n-ph="phFontFileName" placeholder="Nama font (kosongkan = pakai nama file)" style="margin-bottom:6px;">
+        <input type="text" id="fontFileNameTarget" data-i18n-ph="phFontFileName" placeholder="Nama font (opsional — biasanya terdeteksi otomatis dari file)" style="margin-bottom:6px;">
         <input type="file" id="fileFontUpload" accept=".ttf,.otf,.woff,.woff2" hidden>
         <button class="btn btn-s btn-full" id="btnFontUpload" data-i18n="btnUploadFont">📤 Upload File Font</button>
       </div>
@@ -784,7 +784,7 @@ id: {
   lblWidthMm:'Lebar (mm)', lblHeightMm:'Tinggi (mm)', lblDpiExport:'DPI Export', lblCardSides:'Sisi Kartu', chipSingleSide:'Satu Sisi', chipDoubleSide:'Dua Sisi',
   lblBleed:'Extra Size / Bleed (mm)', hintBleed:'Menambah lebar & tinggi kartu saat cetak (bleed), agar hasil potongan tetap penuh warna/gambar meski ada sedikit pergeseran pisau potong. Elemen & posisi tidak berubah — hanya area cetak yang diperluas simetris ke luar. Garis putus-putus di editor menandai batas potong asli.',
   cardCustomFont:'Font Kustom', lblUploadFont:'Upload File Font (.ttf/.otf/.woff/.woff2)', btnUploadFont:'📤 Upload File Font',
-  lblFontFromUrl:'Dari URL Font', btnAdd:'+ Tambah', lblGoogleFont:'Google Font (nama persis)', phGoogleFont:'cth: Playfair Display', phFontFileName:'Nama font (kosongkan = pakai nama file)',
+  lblFontFromUrl:'Dari URL Font', btnAdd:'+ Tambah', lblGoogleFont:'Google Font (nama persis)', phGoogleFont:'cth: Playfair Display', phFontFileName:'Nama font (opsional — biasanya terdeteksi otomatis dari file)',
   hintGoogleFont:'Nama harus sama persis seperti di fonts.google.com',
   cardBg:'Latar Belakang', tabFront:'Depan', tabBack:'Belakang', dzBgP:'Klik atau seret gambar latar', dzBgSub:'PNG/JPG, sesuaikan rasio kartu',
   lblImageMode:'Mode Gambar', chipCoverFull:'Cover (Proporsional Penuh)', chipContainFit:'Contain (Proporsional Pas)', chipStretch:'Stretch (Regangkan)',
@@ -913,7 +913,7 @@ en: {
   lblWidthMm:'Width (mm)', lblHeightMm:'Height (mm)', lblDpiExport:'Export DPI', lblCardSides:'Card Sides', chipSingleSide:'Single Side', chipDoubleSide:'Double Side',
   lblBleed:'Extra Size / Bleed (mm)', hintBleed:'Adds extra width & height to the card when printing (bleed), so trimmed edges stay fully covered in color/image even with a slight cutting-blade shift. Elements & positions don\'t change — only the print area expands symmetrically outward. The dashed line in the editor marks the original cut boundary.',
   cardCustomFont:'Custom Font', lblUploadFont:'Upload Font File (.ttf/.otf/.woff/.woff2)', btnUploadFont:'📤 Upload Font File',
-  lblFontFromUrl:'From Font URL', btnAdd:'+ Add', lblGoogleFont:'Google Font (exact name)', phGoogleFont:'e.g: Playfair Display', phFontFileName:'Font name (leave blank = use file name)',
+  lblFontFromUrl:'From Font URL', btnAdd:'+ Add', lblGoogleFont:'Google Font (exact name)', phGoogleFont:'e.g: Playfair Display', phFontFileName:'Font name (optional — usually auto-detected from the file)',
   hintGoogleFont:'Name must match exactly as shown on fonts.google.com',
   cardBg:'Background', tabFront:'Front', tabBack:'Back', dzBgP:'Click or drag a background image', dzBgSub:'PNG/JPG, match the card ratio',
   lblImageMode:'Image Mode', chipCoverFull:'Cover (Full Proportional)', chipContainFit:'Contain (Fit Proportional)', chipStretch:'Stretch',
@@ -1381,6 +1381,73 @@ function sniffFontFormat(buf){
   }catch(e){}
   return 'unknown';
 }
+// Reads the font's own name straight out of its internal SFNT 'name' table, so an upload is
+// identified by the name the font was actually designed/shipped with — not by whatever the file
+// happens to be called on disk (which can be anything: "download (3).ttf", a renamed copy, etc).
+// This also means re-uploading the *same* font later (even under a totally different filename)
+// still matches and replaces the existing custom-font entry instead of creating a duplicate.
+// Works for TTF/OTF directly, and for WOFF1 (whose tables are zlib-compressed — inflated here via
+// the browser's built-in DecompressionStream). WOFF2 compresses the whole font with Brotli, which
+// this app doesn't ship a decoder for, so it returns null there and the filename is used instead.
+async function readFontNameFromBytes(buf){
+  try{
+    const dv = new DataView(buf);
+    const tag = dv.getUint32(0);
+    let nameBytes = null;
+    if(tag === 0x774F4646){ // 'wOFF'
+      const numTables = dv.getUint16(12);
+      let entry = 44; // WOFF header is 44 bytes, then numTables x 20-byte table directory entries
+      for(let i=0;i<numTables;i++,entry+=20){
+        const t = String.fromCharCode(dv.getUint8(entry),dv.getUint8(entry+1),dv.getUint8(entry+2),dv.getUint8(entry+3));
+        if(t!=='name') continue;
+        const tOffset = dv.getUint32(entry+4), compLength = dv.getUint32(entry+8), origLength = dv.getUint32(entry+12);
+        const raw = new Uint8Array(buf, tOffset, compLength);
+        if(compLength === origLength){ nameBytes = raw; }
+        else if(typeof DecompressionStream !== 'undefined'){
+          const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate'));
+          nameBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+        }
+        break;
+      }
+    } else if(tag === 0x00010000 || tag === 0x4F54544F /* OTTO */ || tag === 0x74727565 /* true */){
+      const numTables = dv.getUint16(4);
+      let entry = 12; // sfnt offset table is 12 bytes, then numTables x 16-byte table records
+      for(let i=0;i<numTables;i++,entry+=16){
+        const t = String.fromCharCode(dv.getUint8(entry),dv.getUint8(entry+1),dv.getUint8(entry+2),dv.getUint8(entry+3));
+        if(t!=='name') continue;
+        const tOffset = dv.getUint32(entry+8), tLength = dv.getUint32(entry+12);
+        nameBytes = new Uint8Array(buf, tOffset, tLength);
+        break;
+      }
+    }
+    return nameBytes ? parseSfntNameTable(nameBytes) : null;
+  }catch(e){ return null; }
+}
+// Parses a raw 'name' table: prefers nameID 4 (full font name), falls back to nameID 1 (family).
+function parseSfntNameTable(bytes){
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const count = dv.getUint16(2);
+  const stringAreaOffset = dv.getUint16(4);
+  let full = null, family = null;
+  for(let i=0;i<count;i++){
+    const rec = 6 + i*12;
+    const platformID = dv.getUint16(rec);
+    const nameID = dv.getUint16(rec+6);
+    const length = dv.getUint16(rec+8);
+    const offset = dv.getUint16(rec+10);
+    if(nameID!==4 && nameID!==1) continue;
+    const start = stringAreaOffset + offset;
+    if(start+length > bytes.byteLength) continue;
+    let str = '';
+    if(platformID===1){ for(let j=0;j<length;j++) str += String.fromCharCode(bytes[start+j]); } // Mac Roman, close enough to Latin1
+    else { for(let j=0;j+1<length;j+=2) str += String.fromCharCode((bytes[start+j]<<8) | bytes[start+j+1]); } // Windows/Unicode, UTF-16BE
+    str = str.trim();
+    if(!str) continue;
+    if(nameID===4 && !full) full = str;
+    if(nameID===1 && !family) family = str;
+  }
+  return full || family || null;
+}
 function arrayBufferToBase64(buf){
   const bytes = new Uint8Array(buf);
   let binary = '';
@@ -1529,7 +1596,7 @@ const state = {
     front: {bg:newBg(), fields:[]},
     back: {bg:newBg(), fields:[]}
   },
-  data: {headers:[], rows:[]},
+  data: {headers:[], rows:[], sourceName:''},
   photoField: '',
   filenameField: '',
   photos: new Map(),
@@ -1795,6 +1862,7 @@ function loadDataFile(file){
       if(!rows.length){ alert(T('errNoDataHeader')); return; }
       state.data.headers = Object.keys(rows[0]);
       state.data.rows = rows.map(r => { const o={}; state.data.headers.forEach(h => o[h]=String(r[h]??'')); return o; });
+      state.data.sourceName = sanitizeFilename((file.name||'').replace(/\.[a-z0-9]+$/i,''));
       state.recordIndex = 0;
       if(!state.photoField) state.photoField = state.data.headers[0];
       if(!state.filenameField) state.filenameField = state.data.headers[0];
@@ -2018,10 +2086,10 @@ $('fileFontUpload').onchange = e => {
     try{
       const buf = ev.target.result;
       const nameTarget = $('fontFileNameTarget').value.trim();
-      // If a target name was given (typed manually, or auto-filled by clicking a font in the list
-      // that's missing its file — see renderCustomFontList), use it as-is so this upload replaces
-      // that exact entry instead of being slugged into a brand new "Name 2" font.
-      const name = nameTarget || slugFontName(file.name.replace(/\.[a-z0-9]+$/i,'') || 'Custom Font');
+      // Priority: (1) a name typed/auto-filled in the override field, (2) the name read straight
+      // out of the font file itself, (3) only as a last resort, the filename.
+      const detected = nameTarget ? null : await readFontNameFromBytes(buf);
+      const name = nameTarget || slugFontName(detected || file.name.replace(/\.[a-z0-9]+$/i,'') || 'Custom Font');
       removeExistingFontFace(name);
       const face = new FontFace(name, buf);
       await face.load();
@@ -2044,17 +2112,20 @@ $('btnFontUrl').onclick = async () => {
   const status = $('fontStatus');
   status.textContent = state.lang==='en' ? 'Loading font from URL...' : 'Memuat font dari URL...';
   try{
-    const guess = (url.split('/').pop()||'CustomFont').replace(/\.[a-z0-9]+(\?.*)?$/i,'').replace(/[-_]+/g,' ') || 'Custom Font';
-    const name = slugFontName(guess);
-    removeExistingFontFace(name);
-    const face = new FontFace(name, `url("${url}")`);
-    await face.load();
-    document.fonts.add(face);
     let bytes = null, format = null;
     try{
       const res = await fetch(url);
       if(res.ok){ bytes = await res.arrayBuffer(); format = sniffFontFormat(bytes); }
     }catch(fe){ /* CORS blocked the raw fetch — preview still works via FontFace, embedding won't */ }
+    // Prefer the name read from the actual font file; only fall back to guessing from the URL
+    // when the fetch failed (CORS) or the name couldn't be parsed out (e.g. WOFF2).
+    const detected = bytes ? await readFontNameFromBytes(bytes) : null;
+    const guess = (url.split('/').pop()||'CustomFont').replace(/\.[a-z0-9]+(\?.*)?$/i,'').replace(/[-_]+/g,' ') || 'Custom Font';
+    const name = slugFontName(detected || guess);
+    removeExistingFontFace(name);
+    const face = new FontFace(name, bytes ? bytes : `url("${url}")`);
+    await face.load();
+    document.fonts.add(face);
     const {replaced} = upsertCustomFont(name, 'url', bytes, format, url);
     const embedOk = format==='ttf' || format==='otf';
     let note = '';
@@ -5058,6 +5129,20 @@ function downloadCanvas(cv, filename){
   }, 'image/png');
 }
 function sanitizeFilename(s){ return String(s||FN('card')).replace(/[\/\\?%*:|"<>]/g,'_').slice(0,60); }
+// Base name for bundled exports (ZIP of PNGs, ZIP of PDFs): uses the uploaded data file's own
+// name (e.g. "data_pegawai.xlsx" → "data_pegawai") when one has been loaded, so the export is
+// easy to tell apart from other batches; falls back to the generic localized name otherwise.
+function exportBaseName(fallbackKey){
+  return state.data.sourceName || FN(fallbackKey);
+}
+// Shared "_YYYYMMDD_HHMMSS" suffix used by every export that should be stamped with the moment it
+// was generated (ZIP bundles, saved layout JSON, etc), so re-exporting later doesn't overwrite an
+// earlier download of the same name.
+function timestampSuffix(){
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
 
 /* ================= EXPORT: ZIP ================= */
 $('btnExportZip').onclick = async () => {
@@ -5087,7 +5172,7 @@ $('btnExportZip').onclick = async () => {
   setExportIndeterminate(state.lang==='en' ? 'Compressing ZIP...' : 'Mengompres ZIP...');
   const blob = await zip.generateAsync({type:'blob'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `${FN('idCardExport')}.zip`; a.click();
+  a.href = URL.createObjectURL(blob); a.download = `${exportBaseName('idCardExport')}_${timestampSuffix()}.zip`; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
   setExportProgress(state.lang==='en' ? `Done. ${rows.length} cards exported.` : `Selesai. ${rows.length} kartu diekspor.`, 1, 1);
 };
@@ -5670,7 +5755,7 @@ $('btnExportPdf').onclick = async () => {
     setExportIndeterminate(state.lang==='en' ? 'Compressing ZIP...' : 'Mengompres ZIP...');
     const blob = await zip.generateAsync({type:'blob'});
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `${FN('idCardPrint')}.zip`; a.click();
+    a.href = URL.createObjectURL(blob); a.download = `${exportBaseName('idCardPrint')}_${timestampSuffix()}.zip`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     setExportProgress(state.lang==='en'
       ? `Done. ${exportRows.length} card(s) exported as ${batchCount} PDF file(s) bundled into one ZIP.`
@@ -5750,10 +5835,7 @@ $('btnSaveLayout').onclick = () => {
   };
   const blob = new Blob([JSON.stringify(cfg,null,2)], {type:'application/json'});
   const a = document.createElement('a');
-  const now = new Date();
-  const pad = n => String(n).padStart(2,'0');
-  const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  a.href = URL.createObjectURL(blob); a.download = `idcardgen_v1_${ts}.json`; a.click();
+  a.href = URL.createObjectURL(blob); a.download = `idcardgen_v1_${timestampSuffix()}.json`; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
 };
 $('btnLoadLayout').onclick = () => $('fileLoadLayout').click();
