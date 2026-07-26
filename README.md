@@ -16,7 +16,6 @@ The repo ships two standalone, self-contained editions of the app. Both offer th
 |---|---|---|
 | Canvas/editing engine | Custom hand-built 2D canvas engine | [Fabric.js](https://fabricjs.com/) |
 | PDF export pipeline | jsPDF + svg2pdf.js | pdf-lib + fontkit (direct) |
-| i18n/tooltip text coverage | Full | Slightly less complete |
 
 ## Key Features
 
@@ -55,8 +54,8 @@ All libraries are loaded from public CDNs — no build step or install required.
 
 | Library | Version | Purpose | Used in |
 |---|---|---|---|
-| [jsPDF](https://github.com/parallax/jsPDF) | 4.2.1 | Generating the print-ready PDF output | v1 |
-| [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2.7.0 | Converting SVG content (vector elements/shapes) into PDF drawing operations | v1 |
+| [jsPDF](https://github.com/parallax/jsPDF) | 4.2.1 | Generating the print-ready PDF output | v1, v2 |
+| [svg2pdf.js](https://github.com/yWorks/svg2pdf.js) | 2.7.0 | Converting SVG content (vector elements/shapes) into PDF drawing operations | v1, v2 |
 | [Fabric.js](http://fabricjs.com/) | 5.3.1 | Canvas rendering and interactive object editing | v2 |
 | [fontkit](https://github.com/foliojs/fontkit) (via `@pdf-lib/fontkit`) | 1.1.1 | Font parsing/embedding for vector PDF text export | v2 |
 | [JSZip](https://stuk.github.io/jszip/) | 3.10.1 | Bundling exported card PNGs into a downloadable ZIP archive | v1, v2 |

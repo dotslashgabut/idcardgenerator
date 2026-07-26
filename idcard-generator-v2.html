@@ -9,6 +9,8 @@
 <!-- Core Libraries: Fabric.js for Editing, pdf-lib + fontkit for Vector PDF Export, xlsx-js for Data, JSZip for ZIP -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.7.0/dist/svg2pdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -410,7 +412,7 @@ table.dtbl tr:hover td{background:var(--surface2)}
         <button class="btn btn-s btn-sm" id="btnPasteEl" data-i18n="btnPasteEl">📄 Tempel</button>
         <button class="btn btn-s btn-sm" id="btnPasteOtherSide" data-i18n="btnPasteOtherSide">⇄ Sisi Lain</button>
       </div>
-      <input type="file" id="fileImageEl" accept="image/*,.svg" hidden>
+      <input type="file" id="fileImageEl" accept="image/*,.svg,.pdf,application/pdf" hidden>
       <div class="field-list" id="fieldList"></div>
       <div class="empty-hint" id="fieldEmptyHint" data-i18n="emptyFieldHint">Belum ada elemen.</div>
     </div>
@@ -547,9 +549,7 @@ table.dtbl tr:hover td{background:var(--surface2)}
       <div class="form-group" style="margin-top:10px">
         <label for="pdfBatchSize" data-i18n="lblPdfBatchSize">Kartu per File PDF</label>
         <input type="number" id="pdfBatchSize" min="1" max="300" value="100">
-        <div class="hint" data-i18n="hintPdfBatchSize">Jika data melebihi angka ini, export PDF otomatis dipecah jadi beberapa file agar tidak gagal/hang. Default &amp; disarankan: 100.</div>
         <label style="margin-top:4px;display:inline-block"><input type="checkbox" id="pdfZipBundle" style="width:auto"> <span data-i18n="chkPdfZipBundle">Bundel jadi satu file ZIP</span></label>
-        <div class="hint" data-i18n="hintPdfZipBundle">Jika dicentang, semua file PDF hasil export (termasuk yang terpecah) digabung jadi satu unduhan .zip.</div>
       </div>
       <div class="divider"></div>
       <div class="btn-row">
@@ -1045,6 +1045,32 @@ function updateCanvasSize(){
   renderSide();
 }
 
+// Caches decoded background-image elements by their data-URL src, so changing a background
+// option (fit/zoom/offset) - which calls renderSide() again with the SAME image src - can reuse
+// the already-decoded image instead of creating a new Image() and waiting for it to decode
+// again. Without this, every option change briefly cleared the canvas and showed a blank/flash
+// frame while the fresh Image() reloaded, most visible with the larger PNG previews rasterized
+// for PDF-sourced backgrounds (up to 1400px on the long side) since those take noticeably
+// longer to decode than a typical small photo/logo. Capped at a handful of entries since each
+// entry can be a sizeable in-memory bitmap.
+const _bgImageDecodeCache = new Map();
+function getDecodedBgImage(src, onReady){
+  const cached = _bgImageDecodeCache.get(src);
+  if(cached && cached.complete && cached.naturalWidth){
+    onReady(cached);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    _bgImageDecodeCache.set(src, img);
+    if(_bgImageDecodeCache.size > 6){
+      _bgImageDecodeCache.delete(_bgImageDecodeCache.keys().next().value);
+    }
+    onReady(img);
+  };
+  img.src = src;
+}
+
 function renderSide(){
   if(!fabricCanvas) return;
   const prevSelId = state.selectedFieldId;
@@ -1069,8 +1095,7 @@ function renderSide(){
   const totalHmm = state.card.hMM + bleedMM * 2;
 
   if(side.bg.image){
-    const bgImg = new Image();
-    bgImg.onload = () => {
+    getDecodedBgImage(side.bg.image, (bgImg) => {
       const containerW = totalWmm * SCALE_FACTOR;
       const containerH = totalHmm * SCALE_FACTOR;
       const imgW = bgImg.width;
@@ -1103,8 +1128,7 @@ function renderSide(){
         evented: false
       });
       fabricCanvas.setBackgroundImage(fabBg, fabricCanvas.renderAll.bind(fabricCanvas));
-    };
-    bgImg.src = side.bg.image;
+    });
   } else {
     fabricCanvas.setBackgroundImage(null, fabricCanvas.renderAll.bind(fabricCanvas));
   }
@@ -1203,11 +1227,38 @@ setupDropzone($('dzBg'), $('fileBg'), files => loadBg(files[0]));
 
 function loadBg(file){
   if(!file) return;
+  if(isPdfFile(file)){
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const buf = e.target.result;
+      try {
+        const { dataUrl, pageW, pageH } = await renderPdfFirstPageToPreview(buf.slice(0));
+        saveHistory();
+        const bg = currentBg();
+        bg.image = dataUrl;
+        bg.pdfSrc = 'data:application/pdf;base64,' + arrayBufferToBase64(buf);
+        bg.pdfPageW = pageW;
+        bg.pdfPageH = pageH;
+        bg.zoom = 1;
+        bg.offsetX = 0;
+        bg.offsetY = 0;
+        renderBgPreview();
+        renderSide();
+      } catch(err){
+        alert((state.lang === 'en' ? 'Failed to read PDF: ' : 'Gagal membaca PDF: ') + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     saveHistory();
     const bg = currentBg();
     bg.image = e.target.result;
+    bg.pdfSrc = null;
+    bg.pdfPageW = null;
+    bg.pdfPageH = null;
     bg.zoom = 1;
     bg.offsetX = 0;
     bg.offsetY = 0;
@@ -1225,6 +1276,9 @@ function renderBgPreview(){
     $('btnRmBg').onclick = () => {
       saveHistory();
       bg.image = null;
+      bg.pdfSrc = null;
+      bg.pdfPageW = null;
+      bg.pdfPageH = null;
       renderBgPreview();
       renderSide();
     };
@@ -1415,6 +1469,288 @@ function generateQrDataUrl(f, textVal){
     return cvs.toDataURL('image/png');
   } catch(e){
     return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  }
+}
+
+// Draws a QR code field as real vector rectangles directly on the pdf-lib page instead of
+// rasterizing it — stays crisp/scannable at any zoom or print size and adds almost nothing to
+// file size. Mirrors generateQrDataUrl()'s own module layout (module count, quiet zone,
+// fg/bg/transparentBg, ecLevel) so the vector result matches the raster preview exactly.
+// Consecutive dark modules within a row are merged into one wider rect (simple run-length
+// encoding) to keep the PDF operator/object count down. Only called for un-rotated/un-skewed/
+// un-flipped/un-outlined placements (see needsFlattenImg gate at the call site) — those cases
+// fall back to the raster path since these rects aren't matrix-transformed to match an
+// arbitrary angle. Returns true on success, false if the qrcode lib/text isn't available
+// (caller then falls back to the existing raster path).
+function drawVectorQrField(targetPage, f, textVal, fX, fY, fW, fH){
+  if(!window.qrcode) return false;
+  const val = textVal || '';
+  if(!val) return false;
+  try {
+    const qr = qrcode(0, f.ecLevel || 'M');
+    qr.addData(val);
+    qr.make();
+
+    const count = qr.getModuleCount();
+    const quiet = f.quietModules !== undefined ? parseInt(f.quietModules) : 4;
+    const totalModules = count + quiet * 2;
+    const size = Math.min(fW, fH);
+    const ox = fX + (fW - size) / 2;
+    const oy = fY + (fH - size) / 2;
+    const cell = size / totalModules;
+    const opacity = f.opacity !== undefined ? f.opacity : 1;
+
+    if(f.transparentBg === false){
+      const [bgR, bgG, bgB] = hexToRgb(f.bg || '#ffffff');
+      targetPage.drawRectangle({
+        x: fX, y: fY, width: fW, height: fH,
+        color: PDFLib.rgb(bgR/255, bgG/255, bgB/255),
+        opacity
+      });
+    }
+
+    const [fgR, fgG, fgB] = hexToRgb(f.fg || '#000000');
+    const fillColor = PDFLib.rgb(fgR/255, fgG/255, fgB/255);
+
+    for(let r = 0; r < count; r++){
+      let c = 0;
+      while(c < count){
+        if(!qr.isDark(r, c)){ c++; continue; }
+        let c2 = c;
+        while(c2 + 1 < count && qr.isDark(r, c2 + 1)) c2++;
+        const rx = ox + (c + quiet) * cell;
+        // Module row r is counted top-down (like the canvas version), but pdf-lib's Y axis
+        // grows bottom-up, so row r's bottom edge maps to (totalModules - r - quiet - 1) cells
+        // up from oy.
+        const ry = oy + (totalModules - (r + quiet) - 1) * cell;
+        const rw = (c2 - c + 1) * cell;
+        targetPage.drawRectangle({ x: rx, y: ry, width: rw, height: cell, color: fillColor, opacity });
+        c = c2 + 1;
+      }
+    }
+    return true;
+  } catch(e){
+    console.warn('Vector QR render failed, falling back to raster', e);
+    return false;
+  }
+}
+
+function isSvgDataUrl(src){
+  return typeof src === 'string' && /^data:image\/svg\+xml/i.test(src);
+}
+
+// Embeds an SVG image field into the pdf-lib export as real vector paths (no rasterization),
+// so it stays crisp at any zoom/print size. pdf-lib itself can't parse/draw SVG, so this
+// renders the SVG into a small standalone jsPDF document (sized exactly to the field's box,
+// in pt) via svg2pdf.js, then hands that single-page PDF to pdf-lib's embedPdf() to embed it
+// as a reusable vector page object that's drawn onto the real export page with drawPage() —
+// same trick a "watermark stamp" PDF uses, just generated on the fly instead of pre-made.
+// Returns true on success; false (caller falls back to raster) if jsPDF/svg2pdf.js aren't
+// loaded, the source can't be parsed, or embedding otherwise fails, so a single bad/unsupported
+// SVG can't break the whole export.
+async function drawVectorSvgField(pdfDoc, targetPage, src, fX, fY, fW, fH, opacity){
+  if(!window.jspdf || !window.jspdf.jsPDF) return false;
+  let holder;
+  try {
+    const text = await (await fetch(src)).text();
+    holder = document.createElement('div');
+    holder.style.cssText = 'position:absolute;left:-99999px;top:-99999px;width:0;height:0;overflow:hidden;';
+    holder.innerHTML = text;
+    const svgEl = holder.querySelector('svg');
+    if(!svgEl) return false;
+    document.body.appendChild(holder);
+
+    const w = Math.max(1, fW), h = Math.max(1, fH);
+    const tmpPdf = new window.jspdf.jsPDF({ unit: 'pt', format: [w, h] });
+    if(typeof tmpPdf.svg !== 'function') return false;
+    await tmpPdf.svg(svgEl, { x: 0, y: 0, width: w, height: h });
+
+    const bytes = tmpPdf.output('arraybuffer');
+    const [embeddedPage] = await pdfDoc.embedPdf(bytes);
+    targetPage.drawPage(embeddedPage, {
+      x: fX, y: fY, width: fW, height: fH,
+      opacity: opacity !== undefined ? opacity : 1
+    });
+    return true;
+  } catch(e){
+    console.warn('Vector SVG embed failed, falling back to raster', e);
+    return false;
+  } finally {
+    if(holder && holder.parentNode) holder.parentNode.removeChild(holder);
+  }
+}
+
+// Returns true if a file the user picked is a PDF (by MIME type or extension, since some
+// browsers/OSes report an empty/generic type for .pdf uploads).
+function isPdfFile(file){
+  return !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+}
+
+// Returns true if a field's stored pdfSrc is a real "data:application/pdf" URI, i.e. the field
+// was uploaded as .pdf and has its original vector page available for the "Keep vector for
+// .pdf" export option below. (A field's f.src is always a PNG preview even when it came from a
+// PDF, since fabric.js can't render a PDF directly - the original bytes live in f.pdfSrc.)
+function isPdfFieldSrc(src){
+  return typeof src === 'string' && /^data:application\/pdf/i.test(src);
+}
+
+// Converts an ArrayBuffer to a base64 string in chunks (avoids call-stack blowups from
+// String.fromCharCode.apply on large files that a single spread/apply call can hit).
+function arrayBufferToBase64(buffer){
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  for(let i = 0; i < bytes.length; i += chunk){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+// Rasterizes the first page of an uploaded PDF to a PNG data URL via pdf.js, for use as the
+// on-canvas/fabric preview and as the raster fallback if vector embedding isn't possible or
+// enabled. Also returns the page's native size in PDF points (natW/natH), which the vector
+// export path below uses as a sensible default when computing box scaling.
+async function renderPdfFirstPageToPreview(arrayBuffer){
+  if(!window.pdfjsLib) throw new Error('pdf.js belum termuat (cek koneksi internet)');
+  const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdfDocument = await loadingTask.promise;
+  const page = await pdfDocument.getPage(1);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const targetLongSidePx = 1400;
+  const scale = Math.max(1, targetLongSidePx / Math.max(baseViewport.width, baseViewport.height));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  return { dataUrl: canvas.toDataURL('image/png'), natW: canvas.width, natH: canvas.height, pageW: baseViewport.width, pageH: baseViewport.height };
+}
+
+// Caches the pdf-lib "embedded page" object per pdfDoc + source PDF, so a background/field that
+// reuses the same uploaded PDF across many cards/records only pays the embedPdf() cost once per
+// export document instead of once per card.
+const _pdfEmbedCache = new WeakMap();
+
+// Computes the drawn width/height (same unit as containerW/H) for fitting an image's natural
+// W x H into a container box, matching the same 'cover'/'contain'/'stretch' + zoom semantics
+// used for card backgrounds on the live fabric canvas (see renderSide's side.bg.image block).
+function computeBgFitSize(imgW, imgH, containerW, containerH, fit, zoom){
+  imgW = imgW || containerW; imgH = imgH || containerH;
+  zoom = zoom || 1;
+  if(fit === 'stretch'){
+    return { drawW: containerW * zoom, drawH: containerH * zoom };
+  }
+  const s = (fit === 'contain')
+    ? Math.min(containerW / imgW, containerH / imgH) * zoom
+    : Math.max(containerW / imgW, containerH / imgH) * zoom; // cover (default)
+  return { drawW: imgW * s, drawH: imgH * s };
+}
+
+// Returns a cached pdf-lib "embedded page" for a data:application/pdf source, embedding it into
+// pdfDoc once and reusing it across every card/background/field that references the same file
+// within this export (shared by drawVectorPdfField and background export below).
+async function getEmbeddedPdfPage(pdfDoc, pdfSrc){
+  let cache = _pdfEmbedCache.get(pdfDoc);
+  if(!cache){ cache = new Map(); _pdfEmbedCache.set(pdfDoc, cache); }
+  let embeddedPage = cache.get(pdfSrc);
+  if(!embeddedPage){
+    const base64 = pdfSrc.split(',')[1] || '';
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const [embedded] = await pdfDoc.embedPdf(bytes);
+    embeddedPage = embedded;
+    cache.set(pdfSrc, embeddedPage);
+  }
+  return embeddedPage;
+}
+
+// Embeds a raster data URL (PNG/JPEG/anything a <img> can decode) into pdfDoc, converting
+// through a canvas to PNG first for formats pdf-lib can't embed directly (webp, gif, bmp...).
+// Returns the embedded pdf-lib image object (has .width/.height) or null on failure.
+async function embedRasterImageForPdf(pdfDoc, dataUrl){
+  if(!dataUrl) return null;
+  if(dataUrl.startsWith('data:image/png')) return await pdfDoc.embedPng(dataUrl);
+  if(dataUrl.startsWith('data:image/jpeg')) return await pdfDoc.embedJpg(dataUrl);
+  if(dataUrl.startsWith('data:image/')){
+    try {
+      const converted = await new Promise((res) => {
+        const convImg = new Image();
+        convImg.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = convImg.naturalWidth || convImg.width || 1;
+          c.height = convImg.naturalHeight || convImg.height || 1;
+          c.getContext('2d').drawImage(convImg, 0, 0);
+          res(c.toDataURL('image/png'));
+        };
+        convImg.onerror = () => res(null);
+        convImg.src = dataUrl;
+      });
+      if(converted) return await pdfDoc.embedPng(converted);
+    } catch(e){ console.warn('Could not convert background image to PNG for export', e); }
+  }
+  return null;
+}
+
+// Draws a card side's background image onto the export page, inside the clip region the caller
+// already pushed for the card's footprint. Reproduces the same fit ('cover'/'contain'/
+// 'stretch') + zoom + pan-offset placement as the live fabric canvas background (see
+// renderSide's side.bg.image block) - and, mirroring the "Keep vector for .pdf" option used for
+// image fields, keeps a .pdf-sourced background as the original vector page instead of
+// rasterizing it whenever that option is on (falling back to raster if embedding fails).
+async function drawCardBackgroundImage(pdfDoc, targetPage, bg, cardX, cardY, containerWpt, containerHpt){
+  const fit = bg.fit || 'cover';
+  const zoom = bg.zoom || 1;
+  const mmToPtLocal = mm => mm * 2.834645669;
+  const offsetXpt = mmToPtLocal(bg.offsetX || 0);
+  const offsetYpt = mmToPtLocal(bg.offsetY || 0);
+
+  let vectorPage = null;
+  if(state.sheet.keepPdfVector && isPdfFieldSrc(bg.pdfSrc)){
+    try { vectorPage = await getEmbeddedPdfPage(pdfDoc, bg.pdfSrc); }
+    catch(e){ console.warn('Vector PDF background embed failed, falling back to raster', e); }
+  }
+
+  let rasterImage = null;
+  if(!vectorPage){
+    try { rasterImage = await embedRasterImageForPdf(pdfDoc, bg.image); }
+    catch(e){ console.warn('Background image embed failed for export', e); }
+    if(!rasterImage) return;
+  }
+
+  const natW = vectorPage ? (bg.pdfPageW || vectorPage.width) : rasterImage.width;
+  const natH = vectorPage ? (bg.pdfPageH || vectorPage.height) : rasterImage.height;
+  const { drawW, drawH } = computeBgFitSize(natW, natH, containerWpt, containerHpt, fit, zoom);
+
+  const baseLeft = (containerWpt - drawW) / 2;
+  const baseTop = (containerHpt - drawH) / 2; // distance from the card's TOP edge, top-down
+  const drawX = cardX + baseLeft + offsetXpt;
+  const topEdgeY = cardY + containerHpt;
+  const drawY = topEdgeY - (baseTop + offsetYpt) - drawH;
+
+  if(vectorPage){
+    targetPage.drawPage(vectorPage, { x: drawX, y: drawY, width: drawW, height: drawH, opacity: 1 });
+  } else {
+    targetPage.drawImage(rasterImage, { x: drawX, y: drawY, width: drawW, height: drawH, opacity: 1 });
+  }
+}
+
+// Embeds an uploaded PDF image field into the pdf-lib export as the original vector page (no
+// rasterization), so it stays crisp at any zoom/print size, mirroring drawVectorSvgField above.
+// Returns true on success; false (caller falls back to raster) if pdf-lib's embedPdf() isn't
+// available or embedding otherwise fails, so a single bad/unsupported PDF can't break the whole
+// export.
+async function drawVectorPdfField(pdfDoc, targetPage, pdfSrc, fX, fY, fW, fH, opacity){
+  if(!pdfDoc || typeof pdfDoc.embedPdf !== 'function') return false;
+  try {
+    const embeddedPage = await getEmbeddedPdfPage(pdfDoc, pdfSrc);
+    targetPage.drawPage(embeddedPage, {
+      x: fX, y: fY, width: fW, height: fH,
+      opacity: opacity !== undefined ? opacity : 1
+    });
+    return true;
+  } catch(e){
+    console.warn('Vector PDF embed failed, falling back to raster', e);
+    return false;
   }
 }
 
@@ -3232,6 +3568,39 @@ $('btnAddImage').onclick = () => {
 $('fileImageEl').onchange = e => {
   const file = e.target.files[0];
   if(!file) return;
+  if(isPdfFile(file)){
+    const reader = new FileReader();
+    reader.onload = async ev => {
+      const buf = ev.target.result;
+      try {
+        const { dataUrl, natW, natH, pageW, pageH } = await renderPdfFirstPageToPreview(buf.slice(0));
+        saveHistory();
+        let defaultW = 30;
+        let defaultH = 30;
+        const aspect = (pageW && pageH) ? (pageW / pageH) : (natW / natH);
+        if(aspect >= 1){
+          defaultW = 30;
+          defaultH = parseFloat((30 / aspect).toFixed(1));
+        } else {
+          defaultH = 30;
+          defaultW = parseFloat((30 * aspect).toFixed(1));
+        }
+        const f = {
+          id: uid(), type: 'image', src: dataUrl, x: 10, y: 10, w: defaultW, h: defaultH,
+          pdfSrc: 'data:application/pdf;base64,' + arrayBufferToBase64(buf),
+          pdfPageW: pageW, pdfPageH: pageH
+        };
+        state.sides[state.activeSide].fields.push(f);
+        renderSide();
+        selectFabricObject(f.id);
+      } catch(err){
+        alert((state.lang === 'en' ? 'Failed to read PDF: ' : 'Gagal membaca PDF: ') + err.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+    return;
+  }
   const reader = new FileReader();
   reader.onload = ev => {
     const srcData = ev.target.result;
@@ -4797,6 +5166,14 @@ $('btnExportPdf').onclick = async () => {
           PDFLib.endPath()
         );
 
+        if(side.bg && side.bg.image){
+          try {
+            await drawCardBackgroundImage(pdfDoc, targetPage, side.bg, cardX, cardY, cardWpt, cardHpt);
+          } catch(e){
+            console.warn('Background image draw failed for export', e);
+          }
+        }
+
         for(const f of side.fields){
           const fX = cardX + mmToPt(f.x + bleedMM);
           const fW = mmToPt(f.w);
@@ -4932,6 +5309,29 @@ $('btnExportPdf').onclick = async () => {
               });
             }
           } else if(f.type === 'photo' || f.type === 'image' || f.type === 'qrcode'){
+            const needsFlattenImg = !!(f.outline || f.skewX || f.skewY || f.rotation || f.flipH || f.flipV);
+
+            // --- Vector fast paths: keep the field as real vector content (QR modules as
+            // rects, SVG as vector paths via svg2pdf.js) instead of rasterizing, matching v1's
+            // "Keep vector for QR code" / "Keep vector for .svg" options. Only attempted when
+            // the field has no rotation/skew/flip/outline of its own (same gate v1 used) —
+            // those still fall through to the raster path further below since the vector
+            // helpers here don't apply their own transform matrices.
+            if(!needsFlattenImg){
+              if(f.type === 'qrcode' && state.sheet.keepQrVector){
+                const qrVal = getFieldValue(f) || '';
+                if(drawVectorQrField(targetPage, f, qrVal, fX, fY, fW, fH)) continue;
+              }
+              if(f.type === 'image' && state.sheet.keepPdfVector && isPdfFieldSrc(f.pdfSrc)){
+                const pdfOk = await drawVectorPdfField(pdfDoc, targetPage, f.pdfSrc, fX, fY, fW, fH, f.opacity);
+                if(pdfOk) continue;
+              }
+              if(f.type === 'image' && state.sheet.keepSvgVector && isSvgDataUrl(f.src)){
+                const svgOk = await drawVectorSvgField(pdfDoc, targetPage, f.src, fX, fY, fW, fH, f.opacity);
+                if(svgOk) continue;
+              }
+            }
+
             let imgDataUrl = null;
             if(f.type === 'photo'){
               if(state.data.rows[r]){
@@ -4964,7 +5364,6 @@ $('btnExportPdf').onclick = async () => {
               } catch(e){}
             }
 
-            const needsFlattenImg = !!(f.outline || f.skewX || f.skewY || f.rotation || f.flipH || f.flipV);
             let imgFlattened = false;
 
             if(needsFlattenImg && imgDataUrl){
@@ -5210,6 +5609,10 @@ $('btnExportZip').onclick = async () => {
 };
 
 // Save & Load Layout JSON
+// NOTE: `sides` is serialized wholesale (no field allowlist), so anything hanging off a
+// background or field object - including bg.pdfSrc/pdfPageW/pdfPageH and a field's own
+// pdfSrc (the original vector bytes kept for the "Keep vector for .pdf" export option) -
+// already round-trips through save/load without needing to be listed here explicitly.
 $('btnSaveLayout').onclick = () => {
   const jsonStr = JSON.stringify({
     card: state.card,
@@ -5302,8 +5705,24 @@ $('fileLoadLayout').onchange = e => {
       if($('cutGuideStyleRow')) $('cutGuideStyleRow').style.display = state.sheet.cutGuides ? 'flex' : 'none';
       if($('combineModeRow')) $('combineModeRow').style.display = state.sheet.combineSides ? 'flex' : 'none';
 
+      // Sync PDF Element Mode chip + the "keep vector" / "embed font" checkboxes that live
+      // under it. These are part of state.sheet (and so were already being saved/loaded above),
+      // but the checkboxes/chips themselves were never refreshed from the loaded values - a
+      // loaded layout's actual keepPdfVector/keepSvgVector/keepQrVector/embedFontVector/
+      // elementMode settings silently kept whatever the UI happened to be showing before load.
+      document.querySelectorAll('#elementModeRow .chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.elementmode === (state.sheet.elementMode || 'layered'));
+      });
+      if($('keepSvgVectorRow')) $('keepSvgVectorRow').style.display = state.sheet.elementMode === 'layered' ? 'block' : 'none';
+      if($('embedFontVector')) $('embedFontVector').checked = !!state.sheet.embedFontVector;
+      if($('keepSvgVector')) $('keepSvgVector').checked = !!state.sheet.keepSvgVector;
+      if($('keepPdfVector')) $('keepPdfVector').checked = state.sheet.keepPdfVector !== false;
+      if($('keepQrVector')) $('keepQrVector').checked = state.sheet.keepQrVector !== false;
+
       if(typeof renderExtraPhotoSources === 'function') renderExtraPhotoSources();
       updateCanvasSize();
+      if(typeof renderBgPreview === 'function') renderBgPreview();
+      if(typeof renderSide === 'function') renderSide();
       applyI18n();
       alert(T('msgLayoutLoaded'));
     } catch(err){
