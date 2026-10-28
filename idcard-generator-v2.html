@@ -1854,14 +1854,14 @@ function createOutlinedImageElement(imgEl, f, widthPx, heightPx){
   const outPxInImg = outlineMm > 0 ? outlineMm * (imgEl.width / (f.w || 1)) : 0;
   const radiusPx = radiusMm > 0 ? radiusMm * (imgEl.width / (f.w || 1)) : 0;
 
-  if(outMode === 'sticker' && outlineMm > 0){
-    const offW = Math.ceil(imgEl.width + outPxInImg * 2);
-    const offH = Math.ceil(imgEl.height + outPxInImg * 2 * ((f.h || 1) / (f.w || 1)));
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = offW;
-    offCanvas.height = offH;
-    const ctx = offCanvas.getContext('2d');
+  const offW = Math.ceil(imgEl.width + outPxInImg * 2);
+  const offH = Math.ceil(imgEl.height + outPxInImg * 2 * ((f.h || 1) / (f.w || 1)));
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = offW;
+  offCanvas.height = offH;
+  const ctx = offCanvas.getContext('2d');
 
+  if(outMode === 'sticker' && outlineMm > 0){
     const offsets = outlineRingOffsets(outPxInImg, 24, outJoin);
     for(const [dx, dy] of offsets){
       ctx.drawImage(imgEl, outPxInImg + dx, outPxInImg + dy);
@@ -1871,29 +1871,7 @@ function createOutlinedImageElement(imgEl, f, widthPx, heightPx){
     ctx.fillRect(0, 0, offW, offH);
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(imgEl, outPxInImg, outPxInImg);
-
-    const outlineScaleW = 1 + (outlineMm * 2) / (f.w || 1);
-    const outlineScaleH = 1 + (outlineMm * 2) / (f.h || 1);
-    const finalWpx = widthPx * outlineScaleW;
-    const finalHpx = heightPx * outlineScaleH;
-    const offsetPx = outlineMm * SCALE_FACTOR;
-
-    return {
-      element: offCanvas,
-      widthPx: finalWpx,
-      heightPx: finalHpx,
-      offsetX: -offsetPx,
-      offsetY: -offsetPx
-    };
   } else {
-    // Box Mode or Radius only
-    const offW = Math.ceil(imgEl.width + outPxInImg * 2);
-    const offH = Math.ceil(imgEl.height + outPxInImg * 2 * ((f.h || 1) / (f.w || 1)));
-    const offCanvas = document.createElement('canvas');
-    offCanvas.width = offW;
-    offCanvas.height = offH;
-    const ctx = offCanvas.getContext('2d');
-
     const imgLeft = outPxInImg;
     const imgTop = outPxInImg;
     const imgW = imgEl.width;
@@ -1926,42 +1904,23 @@ function createOutlinedImageElement(imgEl, f, widthPx, heightPx){
       else { ctx.rect(imgLeft, imgTop, imgW, imgH); }
       ctx.stroke();
     }
-
-    const outlineScaleW = 1 + (outlineMm * 2) / (f.w || 1);
-    const outlineScaleH = 1 + (outlineMm * 2) / (f.h || 1);
-    const finalWpx = widthPx * outlineScaleW;
-    const finalHpx = heightPx * outlineScaleH;
-    const offsetPx = outlineMm * SCALE_FACTOR;
-
-    return {
-      element: offCanvas,
-      widthPx: finalWpx,
-      heightPx: finalHpx,
-      offsetX: -offsetPx,
-      offsetY: -offsetPx
-    };
   }
+
+  const outlineScaleW = 1 + (outlineMm * 2) / (f.w || 1);
+  const outlineScaleH = 1 + (outlineMm * 2) / (f.h || 1);
+  const finalWpx = widthPx * outlineScaleW;
+  const finalHpx = heightPx * outlineScaleH;
+  const offsetPx = outlineMm * SCALE_FACTOR;
+
+  return {
+    element: offCanvas,
+    widthPx: finalWpx,
+    heightPx: finalHpx,
+    offsetX: -offsetPx,
+    offsetY: -offsetPx
+  };
 }
 
-// Re-sorts whatever is currently in `fabricCanvas`'s object stack so its
-// z-order matches side.fields' array order exactly (index 0 = bottom, last
-// index = top - same convention moveLayer() and the PDF export loop use).
-//
-// Why this is needed: addFabricObject() adds text/shape fields to the canvas
-// synchronously, but photo/image/qrcode fields only call fabricCanvas.add()
-// later, inside their Image element's onload callback. Those callbacks fire
-// whenever the browser finishes decoding each image - which has nothing to
-// do with the order the fields were requested in. A large custom image
-// upload in particular can take noticeably longer to decode than a small
-// photo thumbnail or a QR code, so it would often get added to the canvas
-// after fields that are actually above it in the layer list, making it
-// render on top when it should be underneath (or vice versa).
-//
-// Fix: after ANY field finishes being added (sync or async), re-sort the
-// whole object stack against the field order. Regardless of what order the
-// async callbacks fire in, the canvas converges on the correct final order
-// once everything has loaded - and each intermediate re-sort keeps things
-// looking as correct as possible while a slow image is still decoding.
 function reorderCanvasLayers(){
   if(!fabricCanvas) return;
   const side = state.sides[state.activeSide];
@@ -1977,358 +1936,293 @@ function reorderCanvasLayers(){
 
 function addFabricObject(f){
   return new Promise((resolve) => {
-  // Snapshot which canvas + render-pass this call belongs to. renderSide()
-  // bumps fabricCanvas.__renderGen every time it starts a fresh render (e.g.
-  // when a field's data-bound column is changed via the property panel and
-  // the whole side re-renders). Text/shape fields resolve synchronously
-  // within the same pass so this can never go stale for them, but photo/
-  // image/qrcode fields only call fabricCanvas.add() later, inside their
-  // Image element's onload. If the user triggers another renderSide() (or
-  // switches side/record) before that fires, the stale callback would still
-  // add its (now outdated) object onto the freshly-cleared canvas - showing
-  // up as a duplicate ("double") element sitting on top of the correct one.
-  // Checking the snapshot in each onload callback below and bailing out if
-  // it no longer matches closes that gap.
-  const _canvasRef = fabricCanvas;
-  const _renderGen = _canvasRef ? (_canvasRef.__renderGen || 0) : 0;
-  const isStaleRender = () => (fabricCanvas !== _canvasRef) || (_canvasRef.__renderGen || 0) !== _renderGen;
-  let obj = null;
-  const bleedMM = parseFloat(state.card.bleedMM) || 0;
-  const leftPx = (f.x + bleedMM) * SCALE_FACTOR;
-  const topPx = (f.y + bleedMM) * SCALE_FACTOR;
-  const widthPx = f.w * SCALE_FACTOR;
-  const heightPx = f.h * SCALE_FACTOR;
+    const _canvasRef = fabricCanvas;
+    const _renderGen = _canvasRef ? (_canvasRef.__renderGen || 0) : 0;
+    const isStaleRender = () => (fabricCanvas !== _canvasRef) || (_canvasRef.__renderGen || 0) !== _renderGen;
+    let obj = null;
+    const bleedMM = parseFloat(state.card.bleedMM) || 0;
+    const leftPx = (f.x + bleedMM) * SCALE_FACTOR;
+    const topPx = (f.y + bleedMM) * SCALE_FACTOR;
+    const widthPx = f.w * SCALE_FACTOR;
+    const heightPx = f.h * SCALE_FACTOR;
+    const centerX = leftPx + widthPx / 2;
+    const centerY = topPx + heightPx / 2;
 
-  if(f.type === 'text'){
-    let textStr = getFieldValue(f);
-    textStr = applyTextCase(textStr, f.textCase, f.uppercase);
-    // When text has skew or rotation, Fabric computes the pivot from the live
-    // text dimensions (which change when content changes). To prevent position
-    // drift, anchor skewed/rotated text at the design-box center instead.
-    const hasTransform = !!(f.skewX || f.skewY || f.rotation);
-    const isStretch = !!f.stretchEnabled;
-    const isParagraphMode = f.textMode === 'paragraph';
-    const TextClass = isStretch ? fabric.IText : fabric.Textbox;
+    if(f.type === 'text'){
+      let textStr = getFieldValue(f);
+      textStr = applyTextCase(textStr, f.textCase, f.uppercase);
+      const isStretch = !!f.stretchEnabled;
+      const isParagraphMode = f.textMode === 'paragraph';
+      const TextClass = isStretch ? fabric.IText : fabric.Textbox;
 
-    obj = new TextClass(textStr || 'Teks', {
-      originX: 'center',
-      originY: 'center',
-      left: leftPx + widthPx / 2,
-      top: topPx + heightPx / 2,
-      width: widthPx,
-      fontSize: (f.fontSize || 4) * SCALE_FACTOR,
-      fontFamily: f.fontFamily || 'Arial',
-      fontWeight: f.fontWeight || 'normal',
-      fill: f.color || '#111111',
-      textAlign: f.align || 'left',
-      angle: f.rotation || 0,
-      scaleX: f.scaleX || 1,
-      scaleY: f.scaleY || 1,
-      flipX: !!f.flipH,
-      flipY: !!f.flipV,
-      stroke: f.textOutline ? (f.textStrokeColor || '#ffffff') : null,
-      strokeWidth: f.textOutline ? ((f.textStrokeWidth || 0.5) * SCALE_FACTOR) : 0,
-      strokeLineJoin: f.textStrokeLineJoin || 'round',
-      strokeDashArray: f.textDashStyle === 'dashed' ? [4 * SCALE_FACTOR, 3 * SCALE_FACTOR] : (f.textDashStyle === 'dotted' ? [2 * SCALE_FACTOR, 2 * SCALE_FACTOR] : null),
-      strokeUniform: true,
-      paintFirst: 'stroke',
-      opacity: f.opacity !== undefined ? f.opacity : 1,
-      // Artistic (single-line, non-wrapping) text is allowed to overflow its
-      // box width. Fabric's per-object offscreen cache canvas is sized from
-      // obj.width/height (the BOX size), not the actual rendered text width,
-      // so when the text is wider than the box, glyphs get drawn outside the
-      // cache canvas and the cached bitmap comes out corrupted (black blob)
-      // when blitted back onto the main canvas. Disabling caching for this
-      // mode makes Fabric draw straight to the main canvas every frame
-      // instead, sidestepping the bug entirely. Paragraph/stretch text
-      // never overflows its own cache this way, so they keep caching on.
-      objectCaching: !(!f.stretchEnabled && f.textMode !== 'paragraph')
-    });
+      obj = new TextClass(textStr || 'Teks', {
+        originX: 'center',
+        originY: 'center',
+        left: centerX,
+        top: centerY,
+        width: widthPx,
+        fontSize: (f.fontSize || 4) * SCALE_FACTOR,
+        fontFamily: f.fontFamily || 'Arial',
+        fontWeight: f.fontWeight || 'normal',
+        fill: f.color || '#111111',
+        textAlign: f.align || 'left',
+        angle: f.rotation || 0,
+        scaleX: f.scaleX || 1,
+        scaleY: f.scaleY || 1,
+        flipX: !!f.flipH,
+        flipY: !!f.flipV,
+        stroke: f.textOutline ? (f.textStrokeColor || '#ffffff') : null,
+        strokeWidth: f.textOutline ? ((f.textStrokeWidth || 0.5) * SCALE_FACTOR) : 0,
+        strokeLineJoin: f.textStrokeLineJoin || 'round',
+        strokeDashArray: f.textDashStyle === 'dashed' ? [4 * SCALE_FACTOR, 3 * SCALE_FACTOR] : (f.textDashStyle === 'dotted' ? [2 * SCALE_FACTOR, 2 * SCALE_FACTOR] : null),
+        strokeUniform: true,
+        paintFirst: 'stroke',
+        opacity: f.opacity !== undefined ? f.opacity : 1,
+        objectCaching: false
+      });
 
-    // Artistic (single-line) fields must NEVER auto word-wrap on the canvas -
-    // the vector PDF export draws Artistic text as one continuous line with
-    // no wrapping, so the canvas has to match that exactly. Fabric's Textbox
-    // wraps by word width by default, which caused the canvas to show 2+
-    // lines while the PDF still exported a single (overflowing) line. We
-    // keep using Textbox (so the fixed box width still drives left/center/
-    // right alignment, same as PDF), but override _wrapText to only ever
-    // split on explicit '\n' breaks, never on width.
-    if(!isStretch && !isParagraphMode && obj.type === 'textbox'){
-      obj._wrapText = function(lines, desiredWidth){
-        let wrapped = [];
-        this.isWrapping = true;
-        for(let i = 0; i < lines.length; i++){
-          wrapped = wrapped.concat(this._wrapLine(lines[i], i, Infinity));
-        }
-        this.isWrapping = false;
-        return wrapped;
-      };
-      // The constructor above already ran the DEFAULT _wrapText once and
-      // cached the (wrongly wrapped) lines/height before we could override
-      // it. Re-run dimension/line calculation now so it uses our override.
-      obj.initDimensions();
-      // Same dynamicMinWidth caveat as flattenTextFieldToPng: it only grows
-      // `width` to fit a single unbreakable word, not a full overflowing
-      // multi-word line, so `width` can stay pinned to the narrower field
-      // box. Center/right text-align is computed relative to this `width`,
-      // so an undersized value here would misplace overflowing text even
-      // though nothing visibly clips on the large card canvas.
-      if(typeof obj.calcTextWidth === 'function'){
-        obj.width = Math.max(obj.width, obj.calcTextWidth());
+      if(!isStretch && !isParagraphMode && obj.type === 'textbox'){
+        obj._wrapText = function(lines){
+          let wrapped = [];
+          this.isWrapping = true;
+          for(let i = 0; i < lines.length; i++){
+            wrapped = wrapped.concat(this._wrapLine(lines[i], i, Infinity));
+          }
+          this.isWrapping = false;
+          return wrapped;
+        };
+        obj.initDimensions();
+        obj.width = widthPx;
         obj.setCoords();
       }
-    }
-  } else if(f.type === 'photo'){
-    let photoDataUrl = null;
-    if(state.showData && state.data.rows[state.recordIndex]){
-      const { matchField, photos } = photoSourceForField(f);
-      if(matchField){
-        const matchVal = String(state.data.rows[state.recordIndex][matchField] || '').trim().toLowerCase();
-        photoDataUrl = photos.get(matchVal);
+    } else if(f.type === 'photo'){
+      let photoDataUrl = null;
+      if(state.showData && state.data.rows[state.recordIndex]){
+        const { matchField, photos } = photoSourceForField(f);
+        if(matchField){
+          const matchVal = String(state.data.rows[state.recordIndex][matchField] || '').trim().toLowerCase();
+          photoDataUrl = photos.get(matchVal);
+        }
       }
-    }
-    const placeholderSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="%236b7494"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
-    
-    const imgEl = new Image();
-    imgEl.onload = () => {
-      if(isStaleRender()){ resolve(); return; }
-      const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
-      const fabImg = new fabric.Image(rendered.element, {
-        left: leftPx + rendered.offsetX,
-        top: topPx + rendered.offsetY,
-        scaleX: rendered.widthPx / (rendered.element.width || 1),
-        scaleY: rendered.heightPx / (rendered.element.height || 1),
-        angle: f.rotation || 0,
-        skewX: f.skewX || 0,
-        skewY: f.skewY || 0,
-        flipX: !!f.flipH,
-        flipY: !!f.flipV,
-        opacity: f.opacity !== undefined ? f.opacity : 1,
-        fieldId: f.id
-      });
-      fabImg.fieldData = f;
-      fabricCanvas.add(fabImg);
-      reorderCanvasLayers();
-      if(state.selectedFieldId === f.id){
-        fabricCanvas.setActiveObject(fabImg);
+      const placeholderSvg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="%236b7494"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        if(isStaleRender()){ resolve(); return; }
+        const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
+        const fabImg = new fabric.Image(rendered.element, {
+          originX: 'center',
+          originY: 'center',
+          left: centerX,
+          top: centerY,
+          scaleX: rendered.widthPx / (rendered.element.width || 1),
+          scaleY: rendered.heightPx / (rendered.element.height || 1),
+          angle: f.rotation || 0,
+          skewX: f.skewX || 0,
+          skewY: f.skewY || 0,
+          flipX: !!f.flipH,
+          flipY: !!f.flipV,
+          opacity: f.opacity !== undefined ? f.opacity : 1,
+          fieldId: f.id
+        });
+        fabImg.fieldData = f;
+        fabricCanvas.add(fabImg);
+        reorderCanvasLayers();
+        if(state.selectedFieldId === f.id){
+          fabricCanvas.setActiveObject(fabImg);
+        }
+        fabricCanvas.renderAll();
+        resolve();
+      };
+      imgEl.onerror = () => resolve();
+      imgEl.src = photoDataUrl || placeholderSvg;
+      return;
+    } else if(f.type === 'image'){
+      const placeholderImg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="%2300e5b0"><rect width="24" height="24" rx="4" fill="%231e2330"/><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        if(isStaleRender()){ resolve(); return; }
+        const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
+        const fabImg = new fabric.Image(rendered.element, {
+          originX: 'center',
+          originY: 'center',
+          left: centerX,
+          top: centerY,
+          scaleX: rendered.widthPx / (rendered.element.width || 1),
+          scaleY: rendered.heightPx / (rendered.element.height || 1),
+          angle: f.rotation || 0,
+          skewX: f.skewX || 0,
+          skewY: f.skewY || 0,
+          flipX: !!f.flipH,
+          flipY: !!f.flipV,
+          opacity: f.opacity !== undefined ? f.opacity : 1,
+          fieldId: f.id
+        });
+        fabImg.fieldData = f;
+        fabricCanvas.add(fabImg);
+        reorderCanvasLayers();
+        if(state.selectedFieldId === f.id){
+          fabricCanvas.setActiveObject(fabImg);
+        }
+        fabricCanvas.renderAll();
+        resolve();
+      };
+      imgEl.onerror = () => resolve();
+      imgEl.src = f.src || placeholderImg;
+      return;
+    } else if(f.type === 'qrcode'){
+      const val = getFieldValue(f) || '';
+      const qrDataUrl = generateQrDataUrl(f, val);
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        if(isStaleRender()){ resolve(); return; }
+        const fabImg = new fabric.Image(imgEl, {
+          originX: 'center',
+          originY: 'center',
+          left: centerX,
+          top: centerY,
+          scaleX: widthPx / imgEl.width,
+          scaleY: heightPx / imgEl.height,
+          angle: f.rotation || 0,
+          skewX: f.skewX || 0,
+          skewY: f.skewY || 0,
+          flipX: !!f.flipH,
+          flipY: !!f.flipV,
+          opacity: f.opacity !== undefined ? f.opacity : 1,
+          fieldId: f.id
+        });
+        fabImg.fieldData = f;
+        fabricCanvas.add(fabImg);
+        reorderCanvasLayers();
+        if(state.selectedFieldId === f.id){
+          fabricCanvas.setActiveObject(fabImg);
+        }
+        fabricCanvas.renderAll();
+        resolve();
+      };
+      imgEl.onerror = () => resolve();
+      imgEl.src = qrDataUrl;
+      return;
+    } else if(f.type === 'shape'){
+      const st = f.shapeType;
+      const fill = f.fill || '#3b82f6';
+      const stroke = f.stroke || '#111111';
+      const strokeWidth = (f.strokeWidth || 0) * SCALE_FACTOR;
+      const strokeLineJoin = f.strokeLineJoin || 'round';
+      const strokeLineCap = f.strokeLineCap || 'round';
+      let strokeDashArray = null;
+      if(f.dashStyle === 'dashed'){
+        strokeDashArray = [6 * SCALE_FACTOR, 4 * SCALE_FACTOR];
+      } else if(f.dashStyle === 'dotted'){
+        strokeDashArray = [2 * SCALE_FACTOR, 2 * SCALE_FACTOR];
       }
-      fabricCanvas.renderAll();
-      resolve();
-    };
-    imgEl.onerror = () => resolve();
-    imgEl.src = photoDataUrl || placeholderSvg;
-    return;
-  } else if(f.type === 'image'){
-    const placeholderImg = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="%2300e5b0"><rect width="24" height="24" rx="4" fill="%231e2330"/><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
-    
-    const imgEl = new Image();
-    imgEl.onload = () => {
-      if(isStaleRender()){ resolve(); return; }
-      const rendered = createOutlinedImageElement(imgEl, f, widthPx, heightPx);
-      const fabImg = new fabric.Image(rendered.element, {
-        left: leftPx + rendered.offsetX,
-        top: topPx + rendered.offsetY,
-        scaleX: rendered.widthPx / (rendered.element.width || 1),
-        scaleY: rendered.heightPx / (rendered.element.height || 1),
-        angle: f.rotation || 0,
-        skewX: f.skewX || 0,
-        skewY: f.skewY || 0,
-        flipX: !!f.flipH,
-        flipY: !!f.flipV,
-        opacity: f.opacity !== undefined ? f.opacity : 1,
-        fieldId: f.id
-      });
-      fabImg.fieldData = f;
-      fabricCanvas.add(fabImg);
-      reorderCanvasLayers();
-      if(state.selectedFieldId === f.id){
-        fabricCanvas.setActiveObject(fabImg);
+
+      const commonShapeOpts = {
+        originX: 'center', originY: 'center',
+        left: centerX, top: centerY,
+        fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap
+      };
+
+      if(st === 'ellipse'){
+        obj = new fabric.Ellipse({ ...commonShapeOpts, rx: widthPx / 2, ry: heightPx / 2 });
+      } else if(st === 'triangle'){
+        obj = new fabric.Triangle({ ...commonShapeOpts, width: widthPx, height: heightPx });
+      } else if(st === 'rightTriangle'){
+        obj = new fabric.Polygon([
+          {x: 0, y: 0}, {x: 0, y: heightPx}, {x: widthPx, y: heightPx}
+        ], commonShapeOpts);
+      } else if(st === 'diamond'){
+        obj = new fabric.Polygon([
+          {x: widthPx / 2, y: 0}, {x: widthPx, y: heightPx / 2},
+          {x: widthPx / 2, y: heightPx}, {x: 0, y: heightPx / 2}
+        ], commonShapeOpts);
+      } else if(st === 'trapezoid'){
+        obj = new fabric.Polygon([
+          {x: widthPx * 0.25, y: 0}, {x: widthPx * 0.75, y: 0},
+          {x: widthPx, y: heightPx}, {x: 0, y: heightPx}
+        ], commonShapeOpts);
+      } else if(st === 'parallelogram'){
+        obj = new fabric.Polygon([
+          {x: widthPx * 0.3, y: 0}, {x: widthPx, y: 0},
+          {x: widthPx * 0.7, y: heightPx}, {x: 0, y: heightPx}
+        ], commonShapeOpts);
+      } else if(st === 'pentagon'){
+        const pts = [];
+        for(let i=0; i<5; i++){
+          const angle = (i * 72 - 90) * Math.PI / 180;
+          pts.push({ x: (widthPx/2) + (widthPx/2) * Math.cos(angle), y: (heightPx/2) + (heightPx/2) * Math.sin(angle) });
+        }
+        obj = new fabric.Polygon(pts, commonShapeOpts);
+      } else if(st === 'hexagon'){
+        const pts = [];
+        for(let i=0; i<6; i++){
+          const angle = (i * 60 - 90) * Math.PI / 180;
+          pts.push({ x: (widthPx/2) + (widthPx/2) * Math.cos(angle), y: (heightPx/2) + (heightPx/2) * Math.sin(angle) });
+        }
+        obj = new fabric.Polygon(pts, commonShapeOpts);
+      } else if(st === 'star'){
+        const pts = [];
+        for(let i=0; i<10; i++){
+          const r = (i % 2 === 0) ? (widthPx / 2) : (widthPx / 4);
+          const angle = (i * 36 - 90) * Math.PI / 180;
+          pts.push({ x: (widthPx/2) + r * Math.cos(angle), y: (heightPx/2) + r * Math.sin(angle) });
+        }
+        obj = new fabric.Polygon(pts, commonShapeOpts);
+      } else if(st === 'line'){
+        obj = new fabric.Line([0, 0, widthPx, 0], {
+          originX: 'center', originY: 'center',
+          left: centerX, top: centerY,
+          stroke: fill || stroke || '#111111',
+          strokeWidth: strokeWidth || (1 * SCALE_FACTOR),
+          strokeDashArray, strokeLineJoin, strokeLineCap
+        });
+      } else if(st === 'arrow'){
+        const isStrokeOnly = f.variant === 'strokeOnly';
+        obj = new fabric.Path('M 0 0.375 L 0.6 0.375 L 0.6 0.2 L 1 0.5 L 0.6 0.8 L 0.6 0.625 L 0 0.625 Z', {
+          originX: 'center', originY: 'center',
+          left: centerX, top: centerY,
+          scaleX: widthPx, scaleY: heightPx,
+          fill: isStrokeOnly ? 'transparent' : fill,
+          stroke: stroke,
+          strokeWidth: strokeWidth / widthPx,
+          strokeDashArray, strokeLineJoin, strokeLineCap
+        });
+      } else if(st === 'arrowDouble'){
+        obj = new fabric.Path('M 0 0.5 L 0.25 0.2 L 0.25 0.375 L 0.75 0.375 L 0.75 0.2 L 1 0.5 L 0.75 0.8 L 0.75 0.625 L 0.25 0.625 L 0.25 0.8 Z', {
+          originX: 'center', originY: 'center',
+          left: centerX, top: centerY,
+          scaleX: widthPx, scaleY: heightPx,
+          fill: fill, stroke: stroke,
+          strokeWidth: strokeWidth / widthPx,
+          strokeDashArray, strokeLineJoin, strokeLineCap
+        });
+      } else {
+        obj = new fabric.Rect({
+          ...commonShapeOpts,
+          width: widthPx, height: heightPx,
+          rx: (f.radius || 0) * SCALE_FACTOR, ry: (f.radius || 0) * SCALE_FACTOR
+        });
       }
-      fabricCanvas.renderAll();
-      resolve();
-    };
-    imgEl.onerror = () => resolve();
-    imgEl.src = f.src || placeholderImg;
-    return;
-  } else if(f.type === 'qrcode'){
-    const val = getFieldValue(f) || '';
-    const qrDataUrl = generateQrDataUrl(f, val);
-    const imgEl = new Image();
-    imgEl.onload = () => {
-      if(isStaleRender()){ resolve(); return; }
-      const fabImg = new fabric.Image(imgEl, {
-        left: leftPx,
-        top: topPx,
-        scaleX: widthPx / imgEl.width,
-        scaleY: heightPx / imgEl.height,
-        angle: f.rotation || 0,
-        skewX: f.skewX || 0,
-        skewY: f.skewY || 0,
-        flipX: !!f.flipH,
-        flipY: !!f.flipV,
-        opacity: f.opacity !== undefined ? f.opacity : 1,
-        fieldId: f.id
-      });
-      fabImg.fieldData = f;
-      fabricCanvas.add(fabImg);
-      reorderCanvasLayers();
-      if(state.selectedFieldId === f.id){
-        fabricCanvas.setActiveObject(fabImg);
-      }
-      fabricCanvas.renderAll();
-      resolve();
-    };
-    imgEl.onerror = () => resolve();
-    imgEl.src = qrDataUrl;
-    return;
-  } else if(f.type === 'shape'){
-    const st = f.shapeType;
-    const fill = f.fill || '#3b82f6';
-    const stroke = f.stroke || '#111111';
-    const strokeWidth = (f.strokeWidth || 0) * SCALE_FACTOR;
-    const strokeLineJoin = f.strokeLineJoin || 'round';
-    const strokeLineCap = f.strokeLineCap || 'round';
-    // Fabric's default origin ('left'/'top') anchors the STROKE-INCLUSIVE
-    // outer edge of the bounding box at left/top (it adds strokeWidth into
-    // the object's effective dimensions before resolving the origin point).
-    // That means the shape's nominal (unstroked) box - and therefore its
-    // visual center - silently drifts by strokeWidth/2 toward bottom-right
-    // as strokeWidth grows. The PDF export path centers shapes purely on
-    // the nominal f.x/f.y/f.w/f.h box regardless of stroke, so to keep the
-    // live canvas matching the exported PDF, the nominal box's corner must
-    // stay pinned at leftPx/topPx - which means compensating the object's
-    // left/top by pulling the outer edge back in by half the stroke width.
-    const strokePosAdj = strokeWidth / 2;
-    let strokeDashArray = null;
-    if(f.dashStyle === 'dashed'){
-      strokeDashArray = [6 * SCALE_FACTOR, 4 * SCALE_FACTOR];
-    } else if(f.dashStyle === 'dotted'){
-      strokeDashArray = [2 * SCALE_FACTOR, 2 * SCALE_FACTOR];
     }
 
-    if(st === 'ellipse'){
-      obj = new fabric.Ellipse({
-        left: leftPx - strokePosAdj, top: topPx - strokePosAdj, rx: widthPx / 2, ry: heightPx / 2,
-        fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap
+    if(obj){
+      obj.set({
+        angle: f.rotation || 0,
+        skewX: f.skewX || 0,
+        skewY: f.skewY || 0,
+        flipX: !!f.flipH,
+        flipY: !!f.flipV,
+        opacity: f.opacity !== undefined ? f.opacity : 1,
+        fieldId: f.id
       });
-    } else if(st === 'triangle'){
-      obj = new fabric.Triangle({
-        left: leftPx - strokePosAdj, top: topPx - strokePosAdj, width: widthPx, height: heightPx,
-        fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap
-      });
-    } else if(st === 'rightTriangle'){
-      obj = new fabric.Polygon([
-        {x: 0, y: 0},
-        {x: 0, y: heightPx},
-        {x: widthPx, y: heightPx}
-      ], { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'diamond'){
-      obj = new fabric.Polygon([
-        {x: widthPx / 2, y: 0},
-        {x: widthPx, y: heightPx / 2},
-        {x: widthPx / 2, y: heightPx},
-        {x: 0, y: heightPx / 2}
-      ], { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'trapezoid'){
-      obj = new fabric.Polygon([
-        {x: widthPx * 0.25, y: 0},
-        {x: widthPx * 0.75, y: 0},
-        {x: widthPx, y: heightPx},
-        {x: 0, y: heightPx}
-      ], { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'parallelogram'){
-      obj = new fabric.Polygon([
-        {x: widthPx * 0.3, y: 0},
-        {x: widthPx, y: 0},
-        {x: widthPx * 0.7, y: heightPx},
-        {x: 0, y: heightPx}
-      ], { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'pentagon'){
-      const pts = [];
-      for(let i=0; i<5; i++){
-        const angle = (i * 72 - 90) * Math.PI / 180;
-        pts.push({
-          x: (widthPx/2) + (widthPx/2) * Math.cos(angle),
-          y: (heightPx/2) + (heightPx/2) * Math.sin(angle)
-        });
-      }
-      obj = new fabric.Polygon(pts, { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'hexagon'){
-      const pts = [];
-      for(let i=0; i<6; i++){
-        const angle = (i * 60 - 90) * Math.PI / 180;
-        pts.push({
-          x: (widthPx/2) + (widthPx/2) * Math.cos(angle),
-          y: (heightPx/2) + (heightPx/2) * Math.sin(angle)
-        });
-      }
-      obj = new fabric.Polygon(pts, { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'star'){
-      const pts = [];
-      for(let i=0; i<10; i++){
-        const r = (i % 2 === 0) ? (widthPx / 2) : (widthPx / 4);
-        const angle = (i * 36 - 90) * Math.PI / 180;
-        pts.push({
-          x: (widthPx/2) + r * Math.cos(angle),
-          y: (heightPx/2) + r * Math.sin(angle)
-        });
-      }
-      obj = new fabric.Polygon(pts, { left: leftPx - strokePosAdj, top: topPx - strokePosAdj, fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap });
-    } else if(st === 'line'){
-      obj = new fabric.Line([leftPx, topPx, leftPx + widthPx, topPx], {
-        stroke: fill || stroke || '#111111', strokeWidth: strokeWidth || (1 * SCALE_FACTOR), strokeDashArray, strokeLineJoin, strokeLineCap
-      });
-    } else if(st === 'arrow'){
-      const isStrokeOnly = f.variant === 'strokeOnly';
-      obj = new fabric.Path('M 0 0.375 L 0.6 0.375 L 0.6 0.2 L 1 0.5 L 0.6 0.8 L 0.6 0.625 L 0 0.625 Z', {
-        left: leftPx - strokePosAdj, top: topPx - strokePosAdj,
-        scaleX: widthPx, scaleY: heightPx,
-        fill: isStrokeOnly ? 'transparent' : fill,
-        stroke: stroke,
-        strokeWidth: strokeWidth / widthPx,
-        strokeDashArray, strokeLineJoin, strokeLineCap
-      });
-    } else if(st === 'arrowDouble'){
-      obj = new fabric.Path('M 0 0.5 L 0.25 0.2 L 0.25 0.375 L 0.75 0.375 L 0.75 0.2 L 1 0.5 L 0.75 0.8 L 0.75 0.625 L 0.25 0.625 L 0.25 0.8 Z', {
-        left: leftPx - strokePosAdj, top: topPx - strokePosAdj,
-        scaleX: widthPx, scaleY: heightPx,
-        fill: fill, stroke: stroke,
-        strokeWidth: strokeWidth / widthPx,
-        strokeDashArray, strokeLineJoin, strokeLineCap
-      });
-    } else {
-      obj = new fabric.Rect({
-        left: leftPx - strokePosAdj, top: topPx - strokePosAdj, width: widthPx, height: heightPx,
-        rx: (f.radius || 0) * SCALE_FACTOR, ry: (f.radius || 0) * SCALE_FACTOR,
-        fill, stroke, strokeWidth, strokeDashArray, strokeLineJoin, strokeLineCap
-      });
+      obj.fieldData = f;
+      fabricCanvas.add(obj);
+      reorderCanvasLayers();
+      fabricCanvas.renderAll();
     }
-  }
-
-  if(obj){
-    obj.set({
-      angle: f.rotation || 0,
-      skewX: f.skewX || 0,
-      skewY: f.skewY || 0,
-      flipX: !!f.flipH,
-      flipY: !!f.flipV,
-      // Text/photo/image/qrcode already set opacity in their own constructor
-      // above, but shape fields never did - so on any full canvas rebuild
-      // (JSON load, undo/redo, switching sides) shapes silently snapped back
-      // to fully opaque, even though f.opacity was saved/loaded correctly.
-      // Setting it here too, for every type, closes that gap for good.
-      opacity: f.opacity !== undefined ? f.opacity : 1,
-      fieldId: f.id
-    });
-    obj.fieldData = f;
-    fabricCanvas.add(obj);
-    reorderCanvasLayers();
-    fabricCanvas.renderAll();
-  }
-  resolve();
-  }); // end Promise wrapper - resolves synchronously here for text/shape;
-      // photo/image/qrcode branches resolve() their own promise from
-      // inside imgEl.onload/onerror above (see their `return;` earlier)
+    resolve();
+  });
 }
 
 // Renders one card side for ONE record onto a brand-new, detached
@@ -2413,16 +2307,6 @@ function onFabricObjectModified(e){
   if(!obj) return;
 
   if(obj.type === 'activeSelection'){
-    // A dragged/nudged ActiveSelection reports e.target as the group itself,
-    // which has no fieldData of its own - the early `!obj.fieldData` return
-    // below used to bail out here entirely, so nothing about the drag ever
-    // got written back into state.sides.fields. The elements LOOKED like
-    // they moved (Fabric repositions them live on screen) but the underlying
-    // x/y never changed, so the very next renderSide() (switching sides,
-    // undo, any property edit, etc.) snapped every one of them straight
-    // back to its old spot. Fix: apply the group's own net displacement -
-    // e.transform.original is the group's left/top before this drag/nudge
-    // started - equally to every selected child's fieldData.
     const orig = (e.transform && e.transform.original) || null;
     if(orig){
       const dxPx = obj.left - orig.left;
@@ -2445,80 +2329,61 @@ function onFabricObjectModified(e){
   if(!obj.fieldData) return;
   const f = obj.fieldData;
   const bleedMM = parseFloat(state.card.bleedMM) || 0;
-  const strokeW = (obj.stroke && obj.strokeWidth && !obj.strokeUniform) ? obj.strokeWidth : 0;
-  const scaledW = Math.max(1, (obj.width * obj.scaleX) - strokeW);
-  const scaledH = Math.max(1, (obj.height * obj.scaleY) - strokeW);
-  let leftPx = obj.left;
-  let topPx = obj.top;
-  if(obj.originX === 'center') leftPx -= scaledW / 2;
-  else leftPx -= strokeW / 2;
-  if(obj.originY === 'center') topPx -= scaledH / 2;
-  else topPx -= strokeW / 2;
+  const action = (e.transform && e.transform.action) || '';
 
-  f.x = leftPx / SCALE_FACTOR - bleedMM;
-  f.y = topPx / SCALE_FACTOR - bleedMM;
-  f.w = scaledW / SCALE_FACTOR;
-  f.h = scaledH / SCALE_FACTOR;
+  if(action.indexOf('scale') === 0){
+    if(obj.type === 'i-text' || obj.type === 'text' || obj.type === 'textbox'){
+      const stretchOn = !!f.stretchEnabled;
+      const scaledW = Math.max(1, obj.width * obj.scaleX);
+      const scaledH = Math.max(1, obj.height * obj.scaleY);
+
+      if(stretchOn){
+        f.scaleX = obj.scaleX || 1;
+        f.scaleY = obj.scaleY || 1;
+        f.w = scaledW / SCALE_FACTOR;
+        f.h = scaledH / SCALE_FACTOR;
+      } else {
+        const newFs = (obj.fontSize * obj.scaleY) / SCALE_FACTOR;
+        f.fontSize = parseFloat(newFs.toFixed(1));
+        f.scaleX = 1;
+        f.scaleY = 1;
+        f.w = scaledW / SCALE_FACTOR;
+        obj.set({
+          fontSize: newFs * SCALE_FACTOR,
+          width: scaledW,
+          scaleX: 1,
+          scaleY: 1
+        });
+        obj.initDimensions && obj.initDimensions();
+        f.h = (obj.height || scaledH) / SCALE_FACTOR;
+      }
+      obj.setCoords();
+      fabricCanvas.renderAll();
+    } else if(f.type === 'photo' || f.type === 'image'){
+      const outlineMm = (f.outline && f.outlineWidth) ? parseFloat(f.outlineWidth) : 0;
+      const totalWmm = (obj.width * obj.scaleX) / SCALE_FACTOR;
+      const totalHmm = (obj.height * obj.scaleY) / SCALE_FACTOR;
+      f.w = Math.max(1, totalWmm - outlineMm * 2);
+      f.h = Math.max(1, totalHmm - outlineMm * 2);
+    } else {
+      const strokeW = (obj.stroke && obj.strokeWidth && !obj.strokeUniform && f.shapeType !== 'arrow' && f.shapeType !== 'arrowDouble') ? obj.strokeWidth : 0;
+      const scaledW = Math.max(1, (obj.width * obj.scaleX) - strokeW);
+      const scaledH = Math.max(1, (obj.height * obj.scaleY) - strokeW);
+      f.w = scaledW / SCALE_FACTOR;
+      f.h = scaledH / SCALE_FACTOR;
+    }
+  }
+
+  const centerX_mm = obj.left / SCALE_FACTOR - bleedMM;
+  const centerY_mm = obj.top / SCALE_FACTOR - bleedMM;
+  f.x = centerX_mm - f.w / 2;
+  f.y = centerY_mm - f.h / 2;
   f.rotation = obj.angle || 0;
   f.skewX = obj.skewX || 0;
   f.skewY = obj.skewY || 0;
 
   if(obj.type === 'i-text' || obj.type === 'text' || obj.type === 'textbox'){
     f.staticText = obj.text;
-    const action = (e.transform && e.transform.action) || '';
-    // Only a real scale gesture should touch fontSize/scale. object:modified also
-    // fires after plain moves and rotations - those must leave the text's
-    // font size and stretch factors completely untouched.
-    if(action.indexOf('scale') === 0){
-      const corner = (e.transform && e.transform.corner) || '';
-      const axis = (corner === 'ml' || corner === 'mr') ? 'x' : (corner === 'mt' || corner === 'mb') ? 'y' : 'corner';
-      const stretchOn = !!f.stretchEnabled;
-
-      if(axis === 'x' && stretchOn){
-        // Left/right handle + Stretch ON: pure horizontal stretch/condense.
-        // Font size is untouched; only the horizontal factor is persisted.
-        f.scaleX = obj.scaleX || 1;
-        f.scaleY = obj.scaleY || 1;
-        f.w = (obj.width * f.scaleX) / SCALE_FACTOR;
-      } else if(axis === 'y' && stretchOn){
-        // Top/bottom handle + Stretch ON: pure vertical stretch/condense.
-        // Font size is untouched; only the vertical factor is persisted.
-        f.scaleX = obj.scaleX || 1;
-        f.scaleY = obj.scaleY || 1;
-        f.h = (obj.height * f.scaleY) / SCALE_FACTOR;
-      } else if(axis === 'corner' && stretchOn){
-        // Corner handle + Stretch ON: treat this the same as a side-handle
-        // stretch - persist it as a pure scale. Baking into fontSize here
-        // (like the branch below does) would force scaleX/scaleY back to 1
-        // and silently erase whatever horizontal/vertical stretch the user
-        // already dialed in with the side handles, causing a jarring snap
-        // back to unstretched proportions the instant a corner drag starts.
-        f.scaleX = obj.scaleX || 1;
-        f.scaleY = obj.scaleY || 1;
-        f.w = (obj.width * f.scaleX) / SCALE_FACTOR;
-        f.h = (obj.height * f.scaleY) / SCALE_FACTOR;
-      } else {
-        // Corner handle with Stretch OFF, or a side/top-bottom handle with
-        // Stretch OFF: bake into a clean, uniform font-size resize - no distortion.
-        const newFs = (obj.fontSize * obj.scaleY) / SCALE_FACTOR;
-        f.fontSize = parseFloat(newFs.toFixed(1));
-        f.scaleX = 1;
-        f.scaleY = 1;
-        obj.set({
-          fontSize: newFs * SCALE_FACTOR,
-          // Bake the box's own width too, not just fontSize - otherwise
-          // scaleX resets to 1 but obj.width stays at its pre-drag value,
-          // so the box silently shrinks back on every corner/side resize
-          // (compounding across repeated resizes) instead of staying at
-          // the size the user actually dragged to.
-          width: scaledW,
-          scaleX: 1,
-          scaleY: 1
-        });
-      }
-      obj.setCoords();
-      fabricCanvas.renderAll();
-    }
   }
 
   updatePropPanel();
@@ -2696,13 +2561,10 @@ function onFabricObjectMoving(e){
 
   paintOverlay(guides);
 
-  let leftPx = obj.left;
-  let topPx = obj.top;
-  if(obj.originX === 'center') leftPx -= (obj.width * obj.scaleX) / 2;
-  if(obj.originY === 'center') topPx -= (obj.height * obj.scaleY) / 2;
-
-  f.x = leftPx / SCALE_FACTOR - bleedMM;
-  f.y = topPx / SCALE_FACTOR - bleedMM;
+  const centerX_mm = obj.left / SCALE_FACTOR - bleedMM;
+  const centerY_mm = obj.top / SCALE_FACTOR - bleedMM;
+  f.x = centerX_mm - f.w / 2;
+  f.y = centerY_mm - f.h / 2;
   if($('propX')) $('propX').value = f.x.toFixed(1);
   if($('propY')) $('propY').value = f.y.toFixed(1);
 }
@@ -4838,15 +4700,10 @@ $('btnExportPdf').onclick = async () => {
       const RES = 12; // px per mm - high-res raster for crisp print output
       const tmp = new fabric.StaticCanvas(null, { enableRetinaScaling: false });
 
-      // Must mirror the live-editor render logic (see renderField ~line 1401-1462)
-      // exactly, or the flattened PNG drifts from what the user sees on canvas:
-      //  - Stretch mode uses fabric.IText (never auto-wraps by width).
-      //  - Non-paragraph Textbox has _wrapText overridden to only break on
-      //    explicit '\n', never on box width.
-      //  - flipX/flipY must be passed through, same as the live canvas object.
       const isStretch = !!f.stretchEnabled;
       const isParagraphMode = f.textMode === 'paragraph';
       const TextClass = isStretch ? fabric.IText : fabric.Textbox;
+      const designW = Math.max(1, (f.w || 1) * RES);
 
       const tObj = new TextClass(textStr || '', {
         fontFamily: f.fontFamily || 'Arial',
@@ -4855,7 +4712,7 @@ $('btnExportPdf').onclick = async () => {
         fill: f.color || '#111111',
         opacity: f.opacity !== undefined ? f.opacity : 1,
         textAlign: f.align || 'left',
-        width: Math.max(1, (f.w || 1) * RES),
+        width: designW,
         scaleX: f.scaleX || 1,
         scaleY: f.scaleY || 1,
         flipX: !!f.flipH,
@@ -4871,11 +4728,12 @@ $('btnExportPdf').onclick = async () => {
         originX: 'center',
         originY: 'center',
         left: 0,
-        top: 0
+        top: 0,
+        objectCaching: false
       });
 
       if(!isStretch && !isParagraphMode && tObj.type === 'textbox'){
-        tObj._wrapText = function(lines, desiredWidth){
+        tObj._wrapText = function(lines){
           let wrapped = [];
           this.isWrapping = true;
           for(let i = 0; i < lines.length; i++){
@@ -4885,26 +4743,17 @@ $('btnExportPdf').onclick = async () => {
           return wrapped;
         };
         tObj.initDimensions();
-        // Textbox's dynamicMinWidth auto-expand (triggered inside _wrapLine)
-        // only grows `width` to fit a single unbreakable WORD, not a full
-        // overflowing multi-word line - so after the no-wrap override above,
-        // `width` can stay pinned to the original (narrower) field box even
-        // though the actual rendered line is visibly wider. That undersized
-        // `width` is what getBoundingRect() below measures the offscreen
-        // canvas from, so without this correction the flattened PNG canvas
-        // comes out too narrow and the overflow gets clipped at its edge.
-        if(typeof tObj.calcTextWidth === 'function'){
-          tObj.width = Math.max(tObj.width, tObj.calcTextWidth());
-          tObj.setCoords();
-        }
+        tObj.width = designW;
+        tObj.setCoords();
       }
 
       tmp.add(tObj);
       tObj.setCoords();
       const br = tObj.getBoundingRect(true, true);
-      const pad = 4; // safety margin so anti-aliased edges never get clipped
-      const w = Math.max(1, Math.ceil(br.width) + pad * 2);
-      const h = Math.max(1, Math.ceil(br.height) + pad * 2);
+      const actualTextW = (typeof tObj.calcTextWidth === 'function' ? tObj.calcTextWidth() : tObj.width) * (f.scaleX || 1);
+      const extraPad = Math.max(8, Math.ceil(Math.max(0, actualTextW - designW * (f.scaleX || 1)) + 8));
+      const w = Math.max(1, Math.ceil(br.width) + extraPad * 2);
+      const h = Math.max(1, Math.ceil(br.height) + extraPad * 2);
       tmp.setDimensions({ width: w, height: h });
       const bboxCenterX = br.left + br.width / 2;
       const bboxCenterY = br.top + br.height / 2;
@@ -5015,6 +4864,7 @@ $('btnExportPdf').onclick = async () => {
 
       obj.set({
         angle: f.rotation || 0, skewX: f.skewX || 0, skewY: f.skewY || 0,
+        flipX: !!f.flipH, flipY: !!f.flipV,
         opacity: f.opacity !== undefined ? f.opacity : 1,
         originX: 'center', originY: 'center', left: 0, top: 0
       });
@@ -5306,13 +5156,17 @@ $('btnExportPdf').onclick = async () => {
                   ? getWrappedLines(textStr, font, fkFont, fontSizePt, fW)
                   : [textStr];
 
-                const topEdgePt = cardY + cardHpt - mmToPt(f.y + bleedMM);
-                const lineHeightPt = fontSizePt * 1.2;
+                const fabricLineHeightRatio = 1.16;
+                const lineHeightPt = fontSizePt * fabricLineHeightRatio;
+                const totalTextBlockH = linesToDraw.length * lineHeightPt;
+                const centerY_pt = fY + fH / 2;
+                const blockTopPt = centerY_pt + totalTextBlockH / 2;
+
+                const rawAscentRatio = (fkFont && fkFont.unitsPerEm) ? (fkFont.ascent / fkFont.unitsPerEm) : 0.78;
+                const ascentRatio = 0.78 * 0.75 + rawAscentRatio * 0.25;
+                const firstLineBaselineOffset = fontSizePt * ((fabricLineHeightRatio - 1) / 2 + ascentRatio);
                 const fieldOpacity = f.opacity !== undefined ? f.opacity : 1;
 
-                // Opacity is applied ONCE for the whole field (all lines, all
-                // glyphs) via withOpacityGState, not per glyph - see that
-                // helper's comment for why per-glyph opacity is unsafe.
                 withOpacityGState(targetPage, fieldOpacity, (perDrawOpacity) => {
                   linesToDraw.forEach((lineText, lineIdx) => {
                     let textX = fX;
@@ -5325,14 +5179,7 @@ $('btnExportPdf').onclick = async () => {
                       }
                     } catch(e){}
 
-                    const rawAscentRatio = (fkFont && fkFont.unitsPerEm) ? (fkFont.ascent / fkFont.unitsPerEm) : 0.78;
-                    // Blend: mostly the fixed 0.78 baseline that matches the canvas editor's
-                    // own approximation, with a small nudge from the real font metrics so
-                    // fonts with unusually tall/short ascent still get partially corrected
-                    // without overshooting (raw font ascent tends to include extra headroom
-                    // for accents/diacritics that isn't visually present in most text).
-                    const ascentRatio = 0.78 * 0.75 + rawAscentRatio * 0.25;
-                    const lineY = topEdgePt - fontSizePt * ascentRatio - lineIdx * lineHeightPt;
+                    const lineY = blockTopPt - firstLineBaselineOffset - lineIdx * lineHeightPt;
                     drawKernedText(targetPage, lineText || '', {
                       x: textX, y: lineY, size: fontSizePt, font, fkFont,
                       color: PDFLib.rgb(tR/255, tG/255, tB/255),

@@ -125,7 +125,7 @@ table.dtbl tr:hover td{background:var(--surface2)}
 .field-el{position:absolute;box-sizing:border-box;cursor:move;border:1px dashed transparent;display:flex}
 .field-el:hover{border-color:rgba(0,229,176,.5)}
 .field-el.selected{border:1.5px solid var(--accent);box-shadow:0 0 0 3px rgba(0,229,176,.15)}
-.field-el .txt-inner{width:100%;overflow:hidden;word-wrap:break-word;line-height:1.2;font-kerning:none;font-variant-ligatures:none}
+.field-el .txt-inner{width:100%;overflow:hidden;word-wrap:break-word;white-space:pre-wrap;line-height:1.2;font-kerning:none;font-variant-ligatures:none}
 .field-el.editing{cursor:text}
 .field-el.editing .resize-handle,.field-el.editing .rotate-handle,.field-el.editing .skew-handle{display:none}
 .field-inline-edit{position:absolute;inset:0;width:100%;height:100%;resize:none;border:none;padding:0;margin:0;background:transparent;outline:none;overflow:hidden;line-height:1.2;font-kerning:none;font-variant-ligatures:none}
@@ -1103,16 +1103,12 @@ function measureStretchNaturalSize(text, fontWeight, fontPx, fontFamily, strokeE
   }
   const ctx = measureStretchNaturalSize._ctx;
   ctx.font = `${fontWeight} ${fontPx}px "${fontFamily}"`;
-  ctx.fontKerning = 'none'; // jsPDF's embedded-font export draws glyphs using plain advance
-  // widths with no kerning-pair adjustment, so every canvas measurement/draw path needs kerning
-  // switched off too, or wrap points and stretch scaling would be computed against a narrower
-  // (kerned) width than what the exported PDF actually renders, producing a visible shift.
+  ctx.fontKerning = 'none';
   const w = Math.max(1, ctx.measureText(String(text ?? '') || ' ').width);
-  // strokeExtraPx is the full outline stroke width (already doubled to match ctx.lineWidth /
-  // -webkit-text-stroke, which are centered on the glyph edge) — it bleeds outward on every
-  // side, so it widens/heightens the natural box the same way it will actually render.
   const extra = strokeExtraPx||0;
-  return { w: w+extra, h: fontPx*1.2+extra };
+  const lineH = fontPx*1.2;
+  const halfLead = typeof getHalfLead === 'function' ? getHalfLead(ctx, lineH) : 0;
+  return { w: w+extra, h: lineH+extra, halfLead };
 }
 // Applies the field's chosen text-case transform. Replaces the old boolean `uppercase` toggle
 // with a small set of common case styles; every render/measure/export path below calls this
@@ -1156,8 +1152,9 @@ function updateTextStretch(f, el, scale){
     ctx.save();
     ctx.scale(boxWpx/natural.w, boxHpx/natural.h);
     ctx.textAlign = 'left';
-    if(hasOutline) ctx.strokeText(text, 0, 0);
-    ctx.fillText(text, 0, 0);
+    const syOff = natural.halfLead || 0;
+    if(hasOutline) ctx.strokeText(text, 0, syOff);
+    ctx.fillText(text, 0, syOff);
     ctx.restore();
     return;
   }
@@ -1680,14 +1677,15 @@ function snapshotOrig(f){
 // above) — rotating around the padded rect's own center in that case would rotate around the
 // wrong point entirely, drifting further from the live/PNG preview the bigger the asymmetry and
 // the rotation angle got.
-function rotatedBBoxAroundPivot(w, h, px, py, deg, skx, sky){
+function rotatedBBoxAroundPivot(w, h, px, py, deg, skx, sky, flipH, flipV){
   const rad = (deg||0)*Math.PI/180, cos = Math.cos(rad), sin = Math.sin(rad);
   const tanX = Math.tan((skx||0)*Math.PI/180), tanY = Math.tan((sky||0)*Math.PI/180);
+  const sX = flipH ? -1 : 1, sY = flipV ? -1 : 1;
   let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
   [[0,0],[w,0],[w,h],[0,h]].forEach(([x,y]) => {
-    const dx = x-px, dy = y-py;
-    const x1 = dx, y1 = dy + dx*tanY;    // skewY first
-    const x2 = x1 + y1*tanX, y2 = y1;    // then skewX
+    const dx = (x-px)*sX, dy = (y-py)*sY; // flip (innermost) first
+    const x1 = dx, y1 = dy + dx*tanY;     // then skewY
+    const x2 = x1 + y1*tanX, y2 = y1;     // then skewX
     const rx = x2*cos - y2*sin, ry = x2*sin + y2*cos; // then rotate
     if(rx<minX) minX=rx; if(rx>maxX) maxX=rx;
     if(ry<minY) minY=ry; if(ry>maxY) maxY=ry;
@@ -3192,8 +3190,9 @@ function buildFieldEl(f, scale, record, bleedOffPx){
           ctx.translate(padX, padTop);
           ctx.scale(boxWpx/natural.w, boxHpx/natural.h);
           ctx.textAlign = 'left';
-          if(hasOutline) ctx.strokeText(text, 0, 0);
-          ctx.fillText(text, 0, 0);
+          const syOff = natural.halfLead || 0;
+          if(hasOutline) ctx.strokeText(text, 0, syOff);
+          ctx.fillText(text, 0, syOff);
           ctx.restore();
         } else {
           ctx.textAlign = f.align;
@@ -4510,21 +4509,26 @@ function breakLongWord(measureFn, word, maxW){
 // canvas can be grown to fit before anything is drawn instead of clipping it after the fact).
 function getWrappedLines(ctx, text, maxW){
   const measureFn = s => ctx.measureText(s).width;
-  const words = String(text).split(/\s+/);
-  let line = '', lines = [];
-  for(const w of words){
-    const test = line ? line+' '+w : w;
-    if(measureFn(test) <= maxW){ line = test; continue; }
-    if(line){ lines.push(line); line = ''; }
-    if(measureFn(w) <= maxW){ line = w; }
-    else{
-      // word alone doesn't fit maxW — break it character-by-character (see breakLongWord above)
-      const chunks = breakLongWord(measureFn, w, maxW); // ctx.measureText never returns null
-      for(let i=0;i<chunks.length-1;i++) lines.push(chunks[i]);
-      line = chunks[chunks.length-1] || '';
+  const tolW = maxW + (maxW * 0.005); // 0.5% tolerance so font-size scaling across preview vs DPI doesn't flip borderline word-wraps
+  const paragraphs = String(text ?? '').split(/\r?\n/);
+  const lines = [];
+  for(const para of paragraphs){
+    if(para === ''){ lines.push(''); continue; }
+    const words = para.split(/[ \t]+/);
+    let line = '';
+    for(const w of words){
+      const test = line ? line+' '+w : w;
+      if(measureFn(test) <= tolW){ line = test; continue; }
+      if(line){ lines.push(line); line = ''; }
+      if(measureFn(w) <= tolW){ line = w; }
+      else{
+        const chunks = breakLongWord(measureFn, w, tolW);
+        for(let i=0;i<chunks.length-1;i++) lines.push(chunks[i]);
+        line = chunks[chunks.length-1] || '';
+      }
     }
+    if(line) lines.push(line);
   }
-  if(line) lines.push(line);
   return lines;
 }
 // A detached, never-attached 2D context reused purely for measuring text (font metrics only
@@ -4690,16 +4694,31 @@ function measureTextFieldGrowth(f, text, unit){
   const mctx = getMeasureCtx();
   const fontPx = f.fontSize*unit;
   mctx.font = `${f.fontWeight} ${fontPx}px "${f.fontFamily}"`;
-  mctx.fontKerning = 'none'; // match jsPDF's non-kerned glyph spacing so wrap points agree
+  mctx.fontKerning = 'none';
   const hasOutline = setupTextOutline(mctx, f, unit);
   const strokePad = hasOutline ? mctx.lineWidth/2 : 0;
-  let extraH = 0;
+  const glyphBleed = fontPx * 0.25; // safety pad for tall ascenders/descenders/italic overhang
+  let extraTop = 0, extraBottom = 0;
   if(!f.stretch){
-    const boxWpx = Math.max(1, Math.round(f.w*unit)), boxHpx = Math.max(1, Math.round(f.h*unit));
+    const boxWpx = f.w*unit, boxHpx = f.h*unit;
     const lineHpx = f.fontSize*1.2*unit;
-    extraH = Math.max(0, getWrappedLines(mctx, text, boxWpx).length*lineHpx - boxHpx);
+    const contentH = getWrappedLines(mctx, text, boxWpx).length * lineHpx;
+    const overflowH = Math.max(0, contentH - boxHpx);
+    if(f.valign === 'middle'){
+      extraTop = overflowH / 2;
+      extraBottom = overflowH / 2;
+    } else if(f.valign === 'bottom'){
+      extraTop = overflowH;
+    } else {
+      extraBottom = overflowH;
+    }
   }
-  return { hasOutline, padX: strokePad, padTop: strokePad, padBottom: strokePad+extraH };
+  return {
+    hasOutline,
+    padX: strokePad + glyphBleed,
+    padTop: strokePad + glyphBleed + extraTop,
+    padBottom: strokePad + glyphBleed + extraBottom
+  };
 }
 // When `outline` is set, strokes each line first (per-glyph outline, since strokeText/fillText
 // trace the actual letterforms rather than a bounding box) so the fill sits on top of the stroke.
@@ -4953,8 +4972,9 @@ async function renderCardCanvas(sideKey, record, dpi, bgOnly){
         ctx.translate(fx, fy);
         ctx.scale(fw/natural.w, fh/natural.h);
         ctx.textAlign = 'left';
-        if(hasOutline) ctx.strokeText(text, 0, 0);
-        ctx.fillText(text, 0, 0);
+        const syOff = natural.halfLead || 0;
+        if(hasOutline) ctx.strokeText(text, 0, syOff);
+        ctx.fillText(text, 0, syOff);
         ctx.restore();
       } else {
         ctx.textAlign = f.align;
@@ -5008,33 +5028,14 @@ async function renderFieldCanvas(sideKey, f, record, dpi){
   const padXpx = padXmm*mmToPx, padTopPx = padTopMm*mmToPx;
   const rot = f.rotation||0, skx = f.skewX||0, sky = f.skewY||0;
   const flipHField = !!f.flipH, flipVField = !!f.flipV;
-  const fTransformed = !!(rot||skx||sky);
-  // The field's true center within this (possibly padded) content rect — pad is only added to
-  // the right/bottom/top as needed for outline bleed or wrapped-text overflow, so it can be
-  // asymmetric (e.g. padBottom>padTop when text overflows downward but not up), meaning this
-  // point is generally NOT the padded rect's own center. Rotating/skewing must pivot around this
-  // true center (matching the live preview's CSS rotate() and the full-card PNG export, both of
-  // which always rotate the field's real f.w×f.h box) rather than the padded rect's center, or
-  // the placed result silently drifts off from those — the more asymmetric the padding and the
-  // larger the angle, the bigger the drift (this is what previously showed up as text jumping
-  // noticeably further off-position in the PDF export than in the PNG/canvas preview whenever a
-  // rotated field's text wrapped past its box).
+  const fTransformed = !!(rot||skx||sky||flipHField||flipVField);
   const pivotXmm = padXmm + f.w/2, pivotYmm = padTopMm + f.h/2;
-  // When rotated and/or skewed, size the canvas to the transformed bounding box (not just
-  // f.w×f.h, or the padded box×height above) so the content isn't clipped — the caller
-  // repositions/enlarges the placed image to match (see cv.__box/__placeBox below).
-  const bboxMM = fTransformed ? rotatedBBoxAroundPivot(boxWmm, boxHmm, pivotXmm, pivotYmm, rot, skx, sky) : {w:boxWmm, h:boxHmm, pivotX:pivotXmm, pivotY:pivotYmm};
-  const pxW = Math.max(1, Math.round(bboxMM.w * mmToPx)), pxH = Math.max(1, Math.round(bboxMM.h * mmToPx));
+  const bboxMM = fTransformed ? rotatedBBoxAroundPivot(boxWmm, boxHmm, pivotXmm, pivotYmm, rot, skx, sky, flipHField, flipVField) : {w:boxWmm, h:boxHmm, pivotX:pivotXmm, pivotY:pivotYmm};
+  const pxW = Math.max(1, Math.ceil(bboxMM.w * mmToPx)), pxH = Math.max(1, Math.ceil(bboxMM.h * mmToPx));
+  const actualWmm = pxW / mmToPx, actualHmm = pxH / mmToPx;
   const cv = document.createElement('canvas'); cv.width=pxW; cv.height=pxH;
-  // The field-local (pre-rotation) box this canvas actually represents, as an offset/size
-  // relative to the field's own x/y/w/h — 0/f.w/f.h for non-text fields, grown/shifted for text
-  // fields that needed padding above. The caller uses this (instead of assuming the canvas is
-  // exactly f.w×f.h) to place/size the exported image so nothing is squeezed or clipped.
-  cv.__box = {x: -padXmm, y: -padTopMm, w: boxWmm, h: boxHmm};
-  // For a rotated/skewed field, this is where the caller should actually place/size the canvas
-  // (relative to f.x/f.y) so the field's true center — the pivot rotated around above — lands
-  // back at its real on-page position, f.x+f.w/2 / f.y+f.h/2, exactly like the preview and PNG.
-  if(fTransformed) cv.__placeBox = {x: f.w/2 - bboxMM.pivotX, y: f.h/2 - bboxMM.pivotY, w: bboxMM.w, h: bboxMM.h};
+  cv.__box = {x: -padXmm, y: -padTopMm, w: actualWmm, h: actualHmm};
+  if(fTransformed) cv.__placeBox = {x: f.w/2 - bboxMM.pivotX, y: f.h/2 - bboxMM.pivotY, w: actualWmm, h: actualHmm};
   const ctx = cv.getContext('2d');
   if(fTransformed || flipHField || flipVField){
     ctx.translate(bboxMM.pivotX*mmToPx, bboxMM.pivotY*mmToPx);
@@ -5090,7 +5091,7 @@ async function renderFieldCanvas(sideKey, f, record, dpi){
   } else if(f.type==='shape'){
     drawShapeOnCanvas(ctx, f, padXpx, padTopPx, f.w*mmToPx, f.h*mmToPx, mmToPx);
   } else {
-    const boxWpx = origPxW-padXpx*2, boxHpx = f.h*mmToPx;
+    const boxWpx = f.w*mmToPx, boxHpx = f.h*mmToPx;
     const fontPx = f.fontSize*mmToPx;
     ctx.font = `${f.fontWeight} ${fontPx}px "${f.fontFamily}"`;
     ctx.fontKerning = 'none'; // match jsPDF's non-kerned glyph spacing (see measureStretchNaturalSize)
@@ -5103,8 +5104,9 @@ async function renderFieldCanvas(sideKey, f, record, dpi){
       ctx.translate(padXpx, padTopPx);
       ctx.scale(boxWpx/natural.w, boxHpx/natural.h);
       ctx.textAlign = 'left';
-      if(hasOutline) ctx.strokeText(text, 0, 0);
-      ctx.fillText(text, 0, 0);
+      const syOff = natural.halfLead || 0;
+      if(hasOutline) ctx.strokeText(text, 0, syOff);
+      ctx.fillText(text, 0, syOff);
       ctx.restore();
     } else {
       ctx.textAlign = f.align;
@@ -5489,7 +5491,7 @@ async function runPdfExportBatch(exportRows, outFilename, opts){
       // preview/PNG export.
       const fcv = await renderFieldCanvas(sideKey, f, record, dpi);
       const box = fcv.__box || {x:0, y:0, w:f.w, h:f.h};
-      const fTransformed = !!(f.rotation || f.skewX || f.skewY);
+      const fTransformed = !!(f.rotation || f.skewX || f.skewY || f.flipH || f.flipV);
       const fEff = (fTransformed && fcv.__placeBox)
         ? {x: f.x+fcv.__placeBox.x, y: f.y+fcv.__placeBox.y, w: fcv.__placeBox.w, h: fcv.__placeBox.h}
         : {x: f.x+box.x, y: f.y+box.y, w: box.w, h: box.h};
